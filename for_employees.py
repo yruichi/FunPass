@@ -1083,18 +1083,32 @@ class EmployeeDashboard:
         try:
             conn = sqlite3.connect('funpass.db')
             cursor = conn.cursor()
+            # Use wildcards in the SQL query for flexible searching
             cursor.execute('''
+
                 SELECT ticket_id, name, email, reasons, quantity, 
-                       amount, pass_type, booked_date, purchased_date, status
+                       amount, pass_type,
+                       strftime('%m/%d/%Y', booked_date) as booked_date,
+                       strftime('%m/%d/%Y', purchased_date) as purchased_date,
+                       status
                 FROM cancellations
-            ''')
+                WHERE 
+                    LOWER(ticket_id) LIKE ? OR
+                    LOWER(name) LIKE ? OR
+                    LOWER(email) LIKE ? OR
+                    LOWER(reasons) LIKE ? OR
+                    LOWER(pass_type) LIKE ? OR
+                    LOWER(status) LIKE ?
+            ''', tuple(['%' + search_text + '%'] * 6))
+            
             cancellations = cursor.fetchall()
             conn.close()
 
-            # Filter and insert matching data
+            # Insert matching data into treeview
             for cancellation in cancellations:
-                if any(search_text in str(value).lower() for value in cancellation):
-                    self.cancellations_tree.insert('', tk.END, values=cancellation)
+                # Convert any None values to empty strings to avoid errors
+                values = tuple('' if v is None else v for v in cancellation)
+                self.cancellations_tree.insert('', tk.END, values=values)
 
         except Exception as e:
             messagebox.showerror("Search Error", f"Error searching cancellations: {str(e)}")

@@ -1058,32 +1058,36 @@ class AdminDashboard:
 
     def search_cancellations(self, *args):
         search_text = self.cancel_search_var.get().lower()
-        search_by = self.cancel_search_by.get()
 
-        # to clear current display
+        # Clear current display
         for item in self.cancellations_tree.get_children():
             self.cancellations_tree.delete(item)
 
-        # to get all cancellations from database
+        # Get all cancellations from database
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM cancellations')
+        cursor.execute('''
+
+        SELECT 
+            ticket_id, name, email, reasons, quantity, amount,
+            strftime('%m/%d/%Y', booked_date) as booked_date, 
+            strftime('%m/%d/%Y', purchased_date) as purchased_date,
+            status
+        FROM cancellations
+    ''')
         cancellations = cursor.fetchall()
         conn.close()
 
-        # to map search_by to column index
-        column_map = {
-            "Ticket ID": 1,  # Adjusted for cancellations table structure
-            "Name": 2,
-            "Email": 3,
-            "Status": 9
-        }
-        
-        column_idx = column_map[search_by]
-
-        # to filter and display matching cancellations
+        # Filter and display matching cancellations
         for cancellation in cancellations:
-            if search_text in str(cancellation[column_idx]).lower():
+            # Search in all relevant fields (ticket_id, name, email, status)
+            searchable_fields = [
+                str(cancellation[0]),  # ticket_id
+                str(cancellation[1]),  # name
+                str(cancellation[2]),  # email
+                str(cancellation[8])   # status
+            ]
+            if any(search_text in field.lower() for field in searchable_fields):
                 self.cancellations_tree.insert('', tk.END, values=cancellation)
 
     def sort_cancellations(self, sort_option):
@@ -1428,4 +1432,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = AdminDashboard(root)
     root.mainloop()
-    
