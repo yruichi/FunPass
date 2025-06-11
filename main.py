@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkcalendar import DateEntry
 import pandas as pd
-import time  # Add time module import
 from shared import create_database, BaseWindow
+import time  # Add missing import
 
 # database setup
 def create_database():
@@ -192,6 +192,7 @@ class AdminDashboard:
         # to create statistics overview section
         stats_frame = tk.LabelFrame(self.content_frame, text="Overview", 
                                   bg='white', font=('Arial', 12, 'bold'))
+        stats_frame.pack(fill=tk.X, pady=10, padx=5)
 
         # to create a grid for statistics
         for i in range(2):
@@ -266,13 +267,11 @@ class AdminDashboard:
     def update_time(self):
         try:
             current = datetime.now()
-            # Format: "Wednesday, June 6, 2025, 2025-06-11 time"
+            current_time = current.strftime("%m/%d/%Y %H:%M:%S")
+            if hasattr(self, 'time_label'):
+                self.time_label.config(text=current_time)
             if hasattr(self, 'date_label'):
-                weekday_date = current.strftime("%A, %B %d, %Y")
-                iso_date = current.strftime("%Y-%m-%d")
-                time_str = current.strftime("%H:%M:%S")
-                full_date = f"{weekday_date}, {iso_date} {time_str}"
-                self.date_label.config(text=full_date)
+                self.date_label.config(text=current.strftime("%A, %B %d, %Y"))
             self.root.after(1000, self.update_time)
         except Exception as e:
             print(f"Error updating time: {e}")
@@ -508,11 +507,13 @@ class AdminDashboard:
 
     def show_employee_management(self):
         self.clear_content()
+        
         emp_title = tk.Label(self.content_frame, text="Employee Management", font=('Arial', 16, 'bold'), bg='white', anchor='w')
         emp_title.pack(pady=(10, 0), padx=20, anchor='w')
         emp_subtitle = tk.Label(self.content_frame, text="View, Add, Edit, and Delete Employees", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
         emp_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
 
+        # Controls frame
         controls_frame = tk.Frame(self.content_frame, bg='white')
         controls_frame.pack(fill=tk.X, pady=10)
 
@@ -530,47 +531,68 @@ class AdminDashboard:
         sort_options.set("Name (A-Z)")
         sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_employees(sort_options.get()))
 
-        # to create buttons frame
+        # Buttons frame
         buttons_frame = tk.Frame(controls_frame, bg='white')
         buttons_frame.pack(side=tk.RIGHT)
 
-        # to create add button
+        # Add button
         add_btn = tk.Button(buttons_frame, text="Add Employee", 
                           command=lambda: self.show_employee_dialog(mode="add"),
                           bg='#4CAF50', fg='white')
         add_btn.pack(side=tk.LEFT, padx=5)
 
-        # to create edit button
+        # Edit button
         edit_btn = tk.Button(buttons_frame, text="Edit Employee", 
                            command=lambda: self.show_employee_dialog(mode="edit"),
                            bg='#2196F3', fg='white')
         edit_btn.pack(side=tk.LEFT, padx=5)
 
-        # to create delete button
+        # Delete button
         delete_btn = tk.Button(buttons_frame, text="Delete Employee", 
                              command=self.delete_employee,
                              bg='#f44336', fg='white')
         delete_btn.pack(side=tk.LEFT, padx=5)
 
-        # to create employee table
-        columns = ('ID', 'Name', 'Username', 'Password', 'Express', 'Junior', 
-                  'Regular', 'Student', 'PWD', 'Senior')
+        # Create employee table
+        columns = ('ID', 'Name', 'Username', 'Password', 
+                  'Express Alloc', 'Junior Alloc', 'Regular Alloc', 
+                  'Student Alloc', 'PWD Alloc', 'Senior Alloc')
         self.emp_tree = ttk.Treeview(self.content_frame, columns=columns, 
                                     show='headings')
         
-        for col in columns:
-            self.emp_tree.heading(col, text=col)
-            self.emp_tree.column(col, width=100)
+        # Configure columns
+        self.emp_tree.heading('ID', text='ID')
+        self.emp_tree.column('ID', width=50, anchor='center')
+        
+        self.emp_tree.heading('Name', text='Name')
+        self.emp_tree.column('Name', width=150, anchor='w')
+        
+        self.emp_tree.heading('Username', text='Username')
+        self.emp_tree.column('Username', width=100, anchor='w')
+        
+        self.emp_tree.heading('Password', text='Password')
+        self.emp_tree.column('Password', width=100, anchor='w')
+        
+        # Configure allocation columns with centered text
+        alloc_columns = [
+            ('Express Alloc', 'Express'), ('Junior Alloc', 'Junior'),
+            ('Regular Alloc', 'Regular'), ('Student Alloc', 'Student'),
+            ('PWD Alloc', 'PWD'), ('Senior Alloc', 'Senior')
+        ]
+        
+        for col, header in alloc_columns:
+            self.emp_tree.heading(col, text=f'{header}\nAllocation')
+            self.emp_tree.column(col, width=80, anchor='center')
 
         self.emp_tree.pack(fill=tk.BOTH, expand=True, pady=10)
 
-        # to create scrollbar
+        # Create scrollbar
         scrollbar = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, 
                                 command=self.emp_tree.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.emp_tree.configure(yscrollcommand=scrollbar.set)
 
-        # to load employee data
+        # Load employee data
         self.load_employees()
 
     def show_employee_dialog(self, mode="add", event=None):
@@ -583,77 +605,109 @@ class AdminDashboard:
 
         dialog = tk.Toplevel(self.root)
         dialog.title("Add Employee" if mode == "add" else "Edit Employee")
-        dialog.geometry("500x600")
+        dialog.geometry("500x750")  # Made taller to accommodate the new fields
         dialog.configure(bg='white')
 
         # to create main frame
         main_frame = tk.Frame(dialog, bg='white', padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # to create fields with aligned labels and entries
-        fields = [
+        # Basic info section
+        basic_frame = tk.LabelFrame(main_frame, text="Basic Information", bg='white', pady=10, padx=10)
+        basic_frame.pack(fill=tk.X, pady=(0, 20))
+
+        # Basic fields
+        basic_fields = [
             ('Name:', 'name'),
             ('Username:', 'username'),
             ('Password:', 'password'),
+        ]
+
+        basic_entries = {}
+        for label_text, field_name in basic_fields:
+            field_frame = tk.Frame(basic_frame, bg='white')
+            field_frame.pack(fill=tk.X, pady=5)
+            label = tk.Label(field_frame, text=label_text, bg='white', font=('Arial', 11), width=12, anchor='e')
+            label.pack(side=tk.LEFT, padx=(0, 10))
+            entry = tk.Entry(field_frame, font=('Arial', 11), width=30)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            basic_entries[field_name] = entry
+
+        # Ticket allocation section
+        alloc_frame = tk.LabelFrame(main_frame, text="Ticket Allocation", bg='white', pady=10, padx=10)
+        alloc_frame.pack(fill=tk.X)
+
+        # Ticket allocation fields
+        alloc_fields = [
             ('Express Pass:', 'express'),
             ('Junior Pass:', 'junior'),
             ('Regular Pass:', 'regular'),
             ('Student Pass:', 'student'),
             ('PWD Pass:', 'pwd'),
-            ('Senior Citizen Pass:', 'senior')
+            ('Senior Pass:', 'senior')
         ]
 
-        entries = {}
-        max_label_width = max(len(label) for label, _ in fields)
-
-        for label_text, field_name in fields:
-            # to create frame for each field
-            field_frame = tk.Frame(main_frame, bg='white')
+        alloc_entries = {}
+        for label_text, field_name in alloc_fields:
+            field_frame = tk.Frame(alloc_frame, bg='white')
             field_frame.pack(fill=tk.X, pady=5)
-
-            # to create label with fixed width
-            label = tk.Label(field_frame, text=label_text, bg='white', 
-                           font=('Arial', 11), width=max_label_width, anchor='e')
+            label = tk.Label(field_frame, text=label_text, bg='white', font=('Arial', 11), width=12, anchor='e')
             label.pack(side=tk.LEFT, padx=(0, 10))
+            
+            # Create spinbox for ticket quantity
+            spinbox = tk.Spinbox(field_frame, from_=0, to=1000, width=10, font=('Arial', 11))
+            spinbox.pack(side=tk.LEFT)
+            alloc_entries[field_name] = spinbox
 
-            # to create entry
-            entry = tk.Entry(field_frame, font=('Arial', 11), width=30)
-            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            entries[field_name] = entry
-
-            # to set values if editing
-            if mode == "edit":
-                field_idx = {
-                    'name': 1,
-                    'username': 2,
-                    'password': 3,
-                    'express': 4,
-                    'junior': 5,
-                    'regular': 6,
-                    'student': 7,
-                    'pwd': 8,
-                    'senior': 9
-                }
-                if field_name in field_idx:
-                    entry.insert(0, values[field_idx[field_name]])
-
-        # to create buttons frame
-        buttons_frame = tk.Frame(main_frame, bg='white')
-        buttons_frame.pack(pady=20)
+        # Set values if editing
+        if mode == "edit":
+            basic_entries['name'].insert(0, values[1])
+            basic_entries['username'].insert(0, values[2])
+            basic_entries['password'].insert(0, values[3])
+            
+            # Set allocation values
+            alloc_entries['express'].delete(0, tk.END)
+            alloc_entries['express'].insert(0, values[4])
+            alloc_entries['junior'].delete(0, tk.END)
+            alloc_entries['junior'].insert(0, values[5])
+            alloc_entries['regular'].delete(0, tk.END)
+            alloc_entries['regular'].insert(0, values[6])
+            alloc_entries['student'].delete(0, tk.END)
+            alloc_entries['student'].insert(0, values[7])
+            alloc_entries['pwd'].delete(0, tk.END)
+            alloc_entries['pwd'].insert(0, values[8])
+            alloc_entries['senior'].delete(0, tk.END)
+            alloc_entries['senior'].insert(0, values[9])
 
         def save_employee():
-            # to get values from entries
-            employee_data = {field: entries[field].get().strip() for _, field in fields}
+            # Get values from entries
+            employee_data = {
+                'name': basic_entries['name'].get().strip(),
+                'username': basic_entries['username'].get().strip(),
+                'password': basic_entries['password'].get().strip(),
+                'express': int(alloc_entries['express'].get()),
+                'junior': int(alloc_entries['junior'].get()),
+                'regular': int(alloc_entries['regular'].get()),
+                'student': int(alloc_entries['student'].get()),
+                'pwd': int(alloc_entries['pwd'].get()),
+                'senior': int(alloc_entries['senior'].get())
+            }
 
-            # to validate required fields
-            if not employee_data['name'] or not employee_data['username'] or not employee_data['password']:
-                messagebox.showerror("Error", "Name, Username, and Password are required fields!")
+            # Validate inputs
+            if not all([employee_data['name'], employee_data['username'], employee_data['password']]):
+                messagebox.showerror("Error", "Name, username and password are required!")
                 return
-
-            conn = sqlite3.connect('funpass.db')
-            cursor = conn.cursor()
+                
+            # Validate ticket allocations
+            for field in ['express', 'junior', 'regular', 'student', 'pwd', 'senior']:
+                if not str(employee_data[field]).isdigit() or int(employee_data[field]) < 0:
+                    messagebox.showerror("Error", f"Invalid ticket quantity for {field} pass!")
+                    return
 
             try:
+                conn = sqlite3.connect('funpass.db')
+                cursor = conn.cursor()
+                
                 if mode == "add":
                     cursor.execute('''
                         INSERT INTO employees (
@@ -667,7 +721,7 @@ class AdminDashboard:
                         employee_data['student'], employee_data['pwd'],
                         employee_data['senior']
                     ))
-                else:  # to edit mode
+                else:  # edit mode
                     cursor.execute('''
                         UPDATE employees SET
                             name=?, username=?, password=?, express_pass=?,
@@ -687,20 +741,21 @@ class AdminDashboard:
                                   "Employee saved successfully!")
                 dialog.destroy()
                 self.load_employees()  
+            except sqlite3.IntegrityError:
+                messagebox.showerror("Error", "Username already exists!")
             except sqlite3.Error as e:
                 messagebox.showerror("Error", f"Database error: {str(e)}")
             finally:
                 conn.close()
 
-        # to create save button
-        tk.Button(buttons_frame, text="Save", command=save_employee,
-                 bg='#4CAF50', fg='white', font=('Arial', 11),
-                 width=10).pack(side=tk.LEFT, padx=5)
-
-        # to create cancel button
-        tk.Button(buttons_frame, text="Cancel", command=dialog.destroy,
-                 bg='#f44336', fg='white', font=('Arial', 11),
-                 width=10).pack(side=tk.LEFT, padx=5)
+        # Create buttons frame
+        btn_frame = tk.Frame(main_frame, bg='white')
+        btn_frame.pack(pady=20)
+        
+        tk.Button(btn_frame, text="Save", command=save_employee,
+                 bg='#4CAF50', fg='white', font=('Arial', 11)).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Cancel", command=dialog.destroy,
+                 bg='#f44336', fg='white', font=('Arial', 11)).pack(side=tk.LEFT, padx=5)
 
     def delete_employee(self):
         selected_items = self.emp_tree.selection()
@@ -782,7 +837,12 @@ class AdminDashboard:
             self.customers_tree.delete(item)
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.quantity, c.amount, c.booked_date, c.purchased_date, IFNULL(e.name, '') as employee_name FROM customers c LEFT JOIN employees e ON c.employee_id = e.employee_id''')
+        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.quantity, c.amount, 
+                    strftime('%m/%d/%Y', c.booked_date) as booked_date, 
+                    strftime('%m/%d/%Y', c.purchased_date) as purchased_date, 
+                    IFNULL(e.name, '') as employee_name 
+                    FROM customers c 
+                    LEFT JOIN employees e ON c.employee_id = e.employee_id''')
         customers = cursor.fetchall()
         conn.close()
         for customer in customers:
@@ -812,7 +872,12 @@ class AdminDashboard:
             self.customers_tree.delete(item)
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.quantity, c.amount, c.booked_date, c.purchased_date, IFNULL(e.name, '') as employee_name FROM customers c LEFT JOIN employees e ON c.employee_id = e.employee_id''')
+        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.quantity, c.amount, 
+                    strftime('%m/%d/%Y', c.booked_date) as booked_date, 
+                    strftime('%m/%d/%Y', c.purchased_date) as purchased_date, 
+                    IFNULL(e.name, '') as employee_name 
+                    FROM customers c 
+                    LEFT JOIN employees e ON c.employee_id = e.employee_id''')
         customers = cursor.fetchall()
         conn.close()
         for customer in customers:
@@ -1044,7 +1109,9 @@ class AdminDashboard:
         cursor.execute('''
             SELECT 
                 ticket_id, name, email, reasons, quantity, amount,
-                booked_date, purchased_date, status
+                strftime('%m/%d/%Y', booked_date) as booked_date, 
+                strftime('%m/%d/%Y', purchased_date) as purchased_date,
+                status
             FROM cancellations
             ORDER BY id DESC
         ''')
@@ -1165,7 +1232,7 @@ class AdminDashboard:
         reset_btn.pack(side=tk.LEFT, padx=10)
 
         # Show last update time
-        self.price_update_label.config(text=f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        self.price_update_label.config(text=f"Last updated: {time.strftime('%m/%d/%Y %H:%M:%S')}")
 
     def save_prices(self):
         try:
@@ -1265,9 +1332,8 @@ class AdminDashboard:
     def logout(self):
         if messagebox.askyesno("Logout", "Are you sure you want to logout?"):
             self.root.destroy()
-            root = tk.Tk()
-            AdminDashboard(root)
-            root.mainloop()
+            from login import show_login
+            show_login()
 
     def search_employees(self, *args):
         search_text = self.emp_search_var.get().lower()
@@ -1290,48 +1356,26 @@ class AdminDashboard:
                 self.emp_tree.insert('', tk.END, values=employee)
 
     def sort_employees(self, sort_option):
+        # to get all items
         items = []
         for item in self.emp_tree.get_children():
             values = self.emp_tree.item(item)['values']
             items.append(values)
 
-        # Sort based on selected option
+        # to sort based on selected option
         if sort_option == "Name (A-Z)":
-            items.sort(key=lambda x: x[1].lower() if x[1] else '')  # Sort by name
+            items.sort(key=lambda x: x[1])  # to sort by name ascending
         elif sort_option == "Name (Z-A)":
-            items.sort(key=lambda x: x[1].lower() if x[1] else '', reverse=True)
+            items.sort(key=lambda x: x[1], reverse=True)  # to sort by name descending
         elif sort_option == "Username (A-Z)":
-            items.sort(key=lambda x: x[2].lower() if x[2] else '')  # Sort by username
+            items.sort(key=lambda x: x[2])  # to sort by username ascending
         elif sort_option == "Username (Z-A)":
-            items.sort(key=lambda x: x[2].lower() if x[2] else '', reverse=True)
+            items.sort(key=lambda x: x[2], reverse=True)  # to sort by username descending
 
-        # Clear and repopulate the tree
+        # to clear and reload table
         for item in self.emp_tree.get_children():
             self.emp_tree.delete(item)
-            
-        for item in items:
-            self.emp_tree.insert('', tk.END, values=item)
-
-    def sort_employees(self, sort_option):
-        items = []
-        for item in self.emp_tree.get_children():
-            values = self.emp_tree.item(item)['values']
-            items.append(values)
-
-        # Sort based on selected option
-        if sort_option == "Name (A-Z)":
-            items.sort(key=lambda x: x[1].lower() if x[1] else '')  # Sort by name
-        elif sort_option == "Name (Z-A)":
-            items.sort(key=lambda x: x[1].lower() if x[1] else '', reverse=True)
-        elif sort_option == "Username (A-Z)":
-            items.sort(key=lambda x: x[2].lower() if x[2] else '')  # Sort by username
-        elif sort_option == "Username (Z-A)":
-            items.sort(key=lambda x: x[2].lower() if x[2] else '', reverse=True)
-
-        # Clear and repopulate the tree
-        for item in self.emp_tree.get_children():
-            self.emp_tree.delete(item)
-            
+        
         for item in items:
             self.emp_tree.insert('', tk.END, values=item)
 

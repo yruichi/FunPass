@@ -210,20 +210,87 @@ class EmployeeDashboard:
         # Styled Total Availability
         availability_frame = tk.LabelFrame(self.content_frame, text="Total Availability", bg='white', font=('Arial', 12, 'bold'))
         availability_frame.pack(fill=tk.X, pady=10, padx=5)
-        card = tk.Frame(availability_frame, bg='white', relief='solid', bd=1)
-        card.pack(fill=tk.X, padx=10, pady=10)
+
+        # Create frame for availability list
+        avail_frame = tk.Frame(availability_frame, bg='white', relief='solid', bd=1)
+        avail_frame.pack(fill=tk.X, padx=10, pady=5)
+
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('SELECT pass_type FROM pricing')
-        pass_types = [row[0] for row in cursor.fetchall()]
+
+        # Initialize total availability for all pass types to 0
+        total_availability = {
+            'Express Pass': 0,
+            'Junior Pass': 0,
+            'Regular Pass': 0,
+            'Student Pass': 0,
+            'Senior Citizen Pass': 0,
+            'PWD Pass': 0
+        }
+
+        # Get total allocated tickets for all employees
+        cursor.execute('''
+            SELECT 
+                SUM(express_pass) as express_total,
+                SUM(junior_pass) as junior_total,
+                SUM(regular_pass) as regular_total,
+                SUM(student_pass) as student_total,
+                SUM(senior_citizen_pass) as senior_total,
+                SUM(pwd_pass) as pwd_total
+            FROM employees
+        ''')
+        allocated = cursor.fetchone()
+
+        # Get employee's allocation and sold tickets
+        cursor.execute('''
+            SELECT 
+                express_pass, junior_pass, regular_pass, 
+                student_pass, senior_citizen_pass, pwd_pass
+            FROM employees 
+            WHERE employee_id = ?
+        ''', (self.employee_id,))
+        allocated = cursor.fetchone()
+
+        # Define pass types
+        pass_types = ['Express Pass', 'Junior Pass', 'Regular Pass', 'Student Pass', 'Senior Citizen Pass', 'PWD Pass']
+        
+        # Get sold tickets for this employee
+        sold_tickets = {}
         for pass_type in pass_types:
-            cursor.execute('SELECT SUM(quantity) FROM customers WHERE pass_type=?', (pass_type,))
+            cursor.execute('SELECT SUM(quantity) FROM customers WHERE pass_type=? AND employee_id=?', 
+                         (pass_type, self.employee_id))
             sold = cursor.fetchone()[0] or 0
-            available = 1000 - sold
-            row = tk.Frame(card, bg='white')
-            row.pack(fill=tk.X, pady=2)
-            tk.Label(row, text=f"{pass_type}: ", font=('Arial', 12, 'bold'), bg='white', width=20, anchor='w').pack(side=tk.LEFT)
-            tk.Label(row, text=f"{available}", font=('Arial', 12), bg='white', fg='#2196F3', anchor='w').pack(side=tk.LEFT)
+            sold_tickets[pass_type] = int(sold)
+
+        # Map pass types to their allocations
+        pass_data = [
+            ('A', 'Express Pass', int(allocated[0] or 0), sold_tickets['Express Pass']),
+            ('B', 'Junior Pass', int(allocated[1] or 0), sold_tickets['Junior Pass']),
+            ('C', 'Regular Pass', int(allocated[2] or 0), sold_tickets['Regular Pass']),
+            ('D', 'Student Pass', int(allocated[3] or 0), sold_tickets['Student Pass']),
+            ('E', 'Senior Citizen Pass', int(allocated[4] or 0), sold_tickets['Senior Citizen Pass']),
+            ('F', 'PWD Pass', int(allocated[5] or 0), sold_tickets['PWD Pass'])
+        ]
+        
+        for letter, pass_type, total_allocated, sold in pass_data:
+            # Calculate available tickets (allocated minus sold)
+            available = total_allocated - sold
+
+            # Create row for this pass type
+            row_frame = tk.Frame(avail_frame, bg='white')
+            row_frame.pack(fill=tk.X, pady=2)
+            
+            # Display in simple format: A. Express Pass: [available]
+            label_text = f"{letter}. {pass_type}: {available}"
+            tk.Label(
+                row_frame, 
+                text=label_text, 
+                font=('Arial', 11), 
+                bg='white', 
+                anchor='w',
+                fg='#2196F3'
+            ).pack(side=tk.LEFT, padx=15, pady=2)
+
         conn.close()
 
         # Recent Sales Table section
@@ -339,10 +406,19 @@ class EmployeeDashboard:
         controls_frame.pack(fill=tk.X, pady=10)
 
         search_frame = tk.Frame(controls_frame, bg='white')
-        search_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        search_frame.pack(side=tk.LEFT)
         tk.Label(search_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
-        search_entry = tk.Entry(search_frame, textvariable=self.search_var, font=('Arial', 11), width=40)
+        search_entry = tk.Entry(search_frame, textvariable=self.search_var, font=('Arial', 11), width=30)
         search_entry.pack(side=tk.LEFT, padx=5)
+
+        # Sort frame next to search
+        sort_frame = tk.Frame(controls_frame, bg='white')
+        sort_frame.pack(side=tk.LEFT, padx=10)
+        tk.Label(sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
+        sort_options = ttk.Combobox(sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"], width=15)
+        sort_options.pack(side=tk.LEFT, padx=5)
+        sort_options.set("Name (A-Z)")
+        sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_customers(sort_options.get()))
 
         # Buttons for add, edit, delete
         btn_frame = tk.Frame(controls_frame, bg='white')
@@ -350,13 +426,6 @@ class EmployeeDashboard:
         tk.Button(btn_frame, text="Add Customer", command=self.add_customer_dialog, bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Edit Customer", command=self.edit_customer_dialog, bg='#2196F3', fg='white').pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Delete Customer", command=self.delete_customer, bg='#f44336', fg='white').pack(side=tk.LEFT, padx=5)
-
-        sort_frame = tk.Frame(controls_frame, bg='white')
-        sort_frame.pack(side=tk.RIGHT)
-        tk.Label(sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
-        sort_options = ttk.Combobox(sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"])
-        sort_options.pack(side=tk.LEFT, padx=5)
-        sort_options.set("Name (A-Z)")
 
         columns = ('Ticket ID', 'Name', 'Email', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Pass Type')
         self.customers_tree = ttk.Treeview(self.content_frame, columns=columns, show='headings')
@@ -415,11 +484,57 @@ class EmployeeDashboard:
     def get_availability_for_pass(self, pass_type):
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
+        
+        # Get total tickets sold
         cursor.execute('SELECT SUM(quantity) FROM customers WHERE pass_type=?', (pass_type,))
         sold = cursor.fetchone()[0] or 0
-        available = 1000 - sold
+        total_available = 1000 - sold
+        
+        # Get employee's allocation
+        cursor.execute('''
+            SELECT 
+                CASE 
+                    WHEN pass_type = 'Express Pass' THEN express_pass
+                    WHEN pass_type = 'Junior Pass' THEN junior_pass
+                    WHEN pass_type = 'Regular Pass' THEN regular_pass
+                    WHEN pass_type = 'Student Pass' THEN student_pass
+                    WHEN pass_type = 'PWD Pass' THEN pwd_pass
+                    WHEN pass_type = 'Senior Citizen Pass' THEN senior_citizen_pass
+                END
+            FROM employees 
+            WHERE employee_id = ?
+        ''', (self.employee_id,))
+        allocation = cursor.fetchone()[0] or 0
+        
+        # Get tickets already sold by this employee for this pass type
+        cursor.execute('''
+            SELECT SUM(quantity) 
+            FROM customers 
+            WHERE pass_type = ? AND employee_id = ?
+        ''', (pass_type, self.employee_id))
+        employee_sold = cursor.fetchone()[0] or 0
+        
+        # Employee's remaining allocation
+        employee_available = allocation - employee_sold
+        
         conn.close()
-        return available
+        
+        # Return the lower of total availability and employee's remaining allocation
+        return min(total_available, employee_available)
+
+    def compute_amount(self, pass_type_combo, quantity_entry, amount_var):
+        try:
+            pass_type = pass_type_combo.get()
+            quantity = int(quantity_entry.get() or 0)
+            if pass_type and quantity > 0:
+                # Get price from database
+                price = self.get_price_for_pass(pass_type)
+                amount = price * quantity
+                amount_var.set(f"{amount:.2f}")
+            else:
+                amount_var.set("")
+        except ValueError:
+            amount_var.set("")
 
     def add_customer_dialog(self):
         dialog = tk.Toplevel(self.root)
@@ -455,13 +570,14 @@ class EmployeeDashboard:
         # Amount
         tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
         amount_var = tk.StringVar()
-        amount_entry = tk.Entry(main_frame, font=('Arial', 11), textvariable=amount_var, state='readonly', name='amount_entry')
+        amount_entry = tk.Entry(main_frame, font=('Arial', 11), textvariable=amount_var, state='readonly', name='amount_entry'
+        )
         amount_entry.pack(fill=tk.X, pady=(0, 10))
         
         tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
-        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
         booked_date_entry.pack(fill=tk.X, pady=(0, 10))
-        purchased_date = datetime.now().strftime('%Y-%m-%d')
+        purchased_date = datetime.now().strftime('%m/%d/%Y')
         tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
         purchased_date_label = tk.Label(main_frame, text=purchased_date, font=('Arial', 11), bg='white')
         purchased_date_label.pack(fill=tk.X, pady=(0, 10))
@@ -560,11 +676,12 @@ class EmployeeDashboard:
         # Amount
         tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
         amount_var = tk.StringVar(value=values[4])
-        amount_entry = tk.Entry(main_frame, font=('Arial', 11), textvariable=amount_var, state='readonly', name='amount_entry')
+        amount_entry = tk.Entry(main_frame, font=('Arial', 11), textvariable=amount_var, state='readonly', name='amount_entry'
+        )
         amount_entry.pack(fill=tk.X, pady=(0, 10))
         
         tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
-        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
         booked_date_entry.set_date(values[5])
         booked_date_entry.pack(fill=tk.X, pady=(0, 10))
         # Purchased Date
@@ -785,7 +902,7 @@ class EmployeeDashboard:
         y_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         x_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         self.cancellations_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
+ 
         # Load the data
         self.load_cancellations_data()
 
@@ -797,12 +914,13 @@ class EmployeeDashboard:
         try:
             conn = sqlite3.connect('funpass.db')
             cursor = conn.cursor()
-            # Join with customers table to get the pass_type
             cursor.execute('''
-                SELECT c.ticket_id, c.name, c.email, c.reasons, c.quantity, 
-                       c.amount, cu.pass_type, c.booked_date, c.purchased_date, c.status
-                FROM cancellations c
-                LEFT JOIN customers cu ON c.ticket_id = cu.ticket_id
+                SELECT ticket_id, name, email, reasons, quantity, 
+                       amount, pass_type,
+                       strftime('%m/%d/%Y', booked_date) as booked_date,
+                       strftime('%m/%d/%Y', purchased_date) as purchased_date,
+                       status
+                FROM cancellations
             ''')
             cancellations = cursor.fetchall()
             conn.close()
@@ -825,10 +943,9 @@ class EmployeeDashboard:
             conn = sqlite3.connect('funpass.db')
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT c.ticket_id, c.name, c.email, c.reasons, c.quantity, 
-                       c.amount, cu.pass_type, c.booked_date, c.purchased_date, c.status
-                FROM cancellations c
-                LEFT JOIN customers cu ON c.ticket_id = cu.ticket_id
+                SELECT ticket_id, name, email, reasons, quantity, 
+                       amount, pass_type, booked_date, purchased_date, status
+                FROM cancellations
             ''')
             cancellations = cursor.fetchall()
             conn.close()
@@ -897,11 +1014,11 @@ class EmployeeDashboard:
         amount_entry.pack(fill=tk.X, pady=(0, 10))
         # Booked Date
         tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
-        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
         booked_date_entry.pack(fill=tk.X, pady=(0, 10))
         # Purchased Date
         tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
-        purchased_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        purchased_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
         purchased_date_entry.pack(fill=tk.X, pady=(0, 10))
         # Pass Type
         tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
@@ -993,13 +1110,13 @@ class EmployeeDashboard:
 
         # Booked Date
         tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
-        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
         booked_date_entry.set_date(values[7])
         booked_date_entry.pack(fill=tk.X, pady=(0, 10))
 
         # Purchased Date
         tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
-        purchased_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        purchased_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
         purchased_date_entry.set_date(values[8])
         purchased_date_entry.pack(fill=tk.X, pady=(0, 10))
 
@@ -1169,6 +1286,8 @@ class EmployeeDashboard:
     def logout(self):
         if messagebox.askyesno("Logout", "Are you sure you want to logout?"):
             self.root.destroy()
+            from login import show_login
+            show_login()
 
 if __name__ == "__main__":
     root = tk.Tk()
