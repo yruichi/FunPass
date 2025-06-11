@@ -820,6 +820,16 @@ class AdminDashboard:
         sort_options.set("Name (A-Z)")
         sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_customers(sort_options.get()))
 
+        # Add buttons frame
+        buttons_frame = tk.Frame(controls_frame, bg='white')
+        buttons_frame.pack(side=tk.RIGHT, padx=10)
+
+        # Add delete button
+        delete_btn = tk.Button(buttons_frame, text="Delete", 
+                             command=self.delete_customer,
+                             bg='#f44336', fg='white')
+        delete_btn.pack(side=tk.LEFT, padx=5)
+
         columns = ('Ticket ID', 'Name', 'Email', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Employee')
         self.customers_tree = ttk.Treeview(self.content_frame, columns=columns, show='headings')
         for col in columns:
@@ -1379,8 +1389,43 @@ class AdminDashboard:
         for item in items:
             self.emp_tree.insert('', tk.END, values=item)
 
+    def delete_customer(self):
+        selected_item = self.customers_tree.selection()
+        if not selected_item:
+            messagebox.showwarning("No Selection", "Please select a customer record to delete.")
+            return
+
+        if messagebox.askyesno("Confirm Delete", 
+                             "Are you sure you want to delete this customer record?\nThis action cannot be undone."):
+
+            # Get ticket ID from selected item
+            ticket_id = self.customers_tree.item(selected_item[0])['values'][0]
+
+            try:
+                conn = sqlite3.connect('funpass.db')
+                cursor = conn.cursor()
+                
+                # Delete the customer record
+                cursor.execute('DELETE FROM customers WHERE ticket_id = ?', (ticket_id,))
+                
+                # Commit changes and close connection
+                conn.commit()
+                conn.close()
+
+                # Remove from treeview
+                self.customers_tree.delete(selected_item[0])
+                
+                messagebox.showinfo("Success", "Customer record deleted successfully!")
+            
+            except sqlite3.Error as e:
+                messagebox.showerror("Error", f"An error occurred: {str(e)}")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"An unexpected error occurred: {str(e)}")
+
 if __name__ == "__main__":
     create_database()  # to initialize the database
     root = tk.Tk()
     app = AdminDashboard(root)
     root.mainloop()
+    
