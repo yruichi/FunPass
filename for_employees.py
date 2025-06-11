@@ -445,12 +445,34 @@ class EmployeeDashboard:
             self.customers_tree.delete(item)
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('SELECT ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type FROM customers WHERE employee_id=?', (self.employee_id,))
+        cursor.execute('''
+            SELECT ticket_id, name, email, quantity, amount, 
+                   strftime('%Y-%m-%d', booked_date) as booked_date,
+                   strftime('%Y-%m-%d', purchased_date) as purchased_date,
+                   pass_type 
+            FROM customers 
+            WHERE employee_id=?
+        ''', (self.employee_id,))
         customers = cursor.fetchall()
         conn.close()
+
         for customer in customers:
-            if any(search_text in str(value).lower() for value in customer):
-                self.customers_tree.insert('', tk.END, values=customer)
+            # Convert tuple to list for modification
+            data = list(customer)
+            
+            # Format dates
+            try:
+                if data[5]:  # booked_date
+                    date_obj = datetime.strptime(data[5], '%Y-%m-%d')
+                    data[5] = date_obj.strftime('%m-%d-%Y')
+                if data[6]:  # purchased_date
+                    date_obj = datetime.strptime(data[6], '%Y-%m-%d')
+                    data[6] = date_obj.strftime('%m-%d-%Y')
+            except ValueError:
+                pass
+
+            if any(search_text in str(value).lower() for value in data):
+                self.customers_tree.insert('', tk.END, values=data)
 
     def sort_customers(self, sort_option):
         items = []
@@ -475,11 +497,38 @@ class EmployeeDashboard:
             self.customers_tree.delete(item)
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('SELECT ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type FROM customers WHERE employee_id=?', (self.employee_id,))
+        cursor.execute('''
+            SELECT ticket_id, name, email, quantity, amount, 
+                   strftime('%Y-%m-%d', booked_date) as booked_date,
+                   strftime('%Y-%m-%d', purchased_date) as purchased_date,
+                   pass_type 
+            FROM customers 
+            WHERE employee_id=?
+        ''', (self.employee_id,))
         customers = cursor.fetchall()
         conn.close()
+
         for customer in customers:
-            self.customers_tree.insert('', tk.END, values=customer)
+            # Convert tuple to list for modification
+            data = list(customer)
+            
+            # Format booked_date (index 5)
+            try:
+                if data[5]:
+                    date_obj = datetime.strptime(data[5], '%Y-%m-%d')
+                    data[5] = date_obj.strftime('%m-%d-%Y')
+            except ValueError:
+                pass
+
+            # Format purchased_date (index 6)
+            try:
+                if data[6]:
+                    date_obj = datetime.strptime(data[6], '%Y-%m-%d')
+                    data[6] = date_obj.strftime('%m-%d-%Y')
+            except ValueError:
+                pass
+
+            self.customers_tree.insert('', tk.END, values=data)
 
     def get_availability_for_pass(self, pass_type):
         conn = sqlite3.connect('funpass.db')
@@ -556,83 +605,122 @@ class EmployeeDashboard:
         email_entry = tk.Entry(main_frame, font=('Arial', 11))
         email_entry.pack(fill=tk.X, pady=(0, 10))
         
+        # Pass Type (move this before quantity)
+        tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
+        pass_type_combo = ttk.Combobox(main_frame, values=self.get_pass_types(), font=('Arial', 11))
+        pass_type_combo.pack(fill=tk.X, pady=(0, 10))
+
         # Quantity
         tk.Label(main_frame, text="Quantity:", font=('Arial', 11), bg='white').pack(anchor='w')
-        quantity_entry = tk.Entry(main_frame, font=('Arial', 11), name='quantity_entry'
-        )
+        quantity_entry = tk.Entry(main_frame, font=('Arial', 11))
         quantity_entry.pack(fill=tk.X, pady=(0, 10))
-        
-        # Pass Type
-        tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
-        pass_type_combo = ttk.Combobox(main_frame, values=self.get_pass_types(), font=('Arial', 11), name='pass_type_combo')
-        pass_type_combo.pack(fill=tk.X, pady=(0, 10))
-        
-        # Amount
+
+        # Amount (read-only)
         tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
-        amount_var = tk.StringVar()
-        amount_entry = tk.Entry(main_frame, font=('Arial', 11), textvariable=amount_var, state='readonly', name='amount_entry'
-        )
+        amount_var = tk.StringVar(value="₱0.00")
+        amount_entry = tk.Entry(main_frame, textvariable=amount_var, font=('Arial', 11), state='readonly')
         amount_entry.pack(fill=tk.X, pady=(0, 10))
+
+        def update_amount(*args):
+            try:
+                pass_type = pass_type_combo.get()
+                quantity = int(quantity_entry.get() if quantity_entry.get() else 0)
+                if pass_type and quantity > 0:
+                    price = self.get_price_for_pass(pass_type)
+                    total = price * quantity
+                    amount_var.set(f"₱{total:,.2f}")
+                else:
+                    amount_var.set("₱0.00")
+            except ValueError:
+                amount_var.set("₱0.00")
+
+        # Bind the update function to both pass type and quantity changes
+        pass_type_combo.bind('<<ComboboxSelected>>', update_amount)
+        quantity_entry.bind('<KeyRelease>', update_amount)
         
         tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
-        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
+        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
         booked_date_entry.pack(fill=tk.X, pady=(0, 10))
-        purchased_date = datetime.now().strftime('%m/%d/%Y')
+        purchased_date = datetime.now().strftime('%Y-%m-%d')
+        
         tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
         purchased_date_label = tk.Label(main_frame, text=purchased_date, font=('Arial', 11), bg='white')
         purchased_date_label.pack(fill=tk.X, pady=(0, 10))
-        # Show available tickets for selected pass type
-        available_var = tk.StringVar(value="")
-        available_label = tk.Label(main_frame, textvariable=available_var, font=('Arial', 10), fg='#6b7280', bg='white')
-        available_label.pack(anchor='w', pady=(0, 10))
-        def update_amount_and_availability(*args):
-            try:
-                pass_type = pass_type_combo.get()
-                quantity = int(quantity_entry.get())
-                # Always get fresh price from database
-                price = self.get_price_for_pass(pass_type)
-                available = self.get_availability_for_pass(pass_type)
-                amount = price * quantity
-                amount_var.set(f"{amount:.2f}")
-                available_var.set(f"Available: {available}")
-                if quantity > available:
-                    quantity_entry.config(fg='red')
-                else:
-                    quantity_entry.config(fg='black')
-            except Exception:
-                amount_var.set("")
-                available_var.set("")
-                quantity_entry.config(fg='black')
-        
-        pass_type_combo.bind('<<ComboboxSelected>>', update_amount_and_availability)
-        quantity_entry.bind('<KeyRelease>', update_amount_and_availability)
+
         def save_customer():
             name = name_entry.get().strip()
             email = email_entry.get().strip()
             quantity = quantity_entry.get().strip()
             pass_type = pass_type_combo.get().strip()
-            amount = amount_var.get().strip()
+            amount = amount_var.get().replace('₱', '').replace(',', '')
             booked_date = booked_date_entry.get()
-            if not (name and email and quantity and pass_type and amount and booked_date and purchased_date):
+
+            if not (name and email and quantity and pass_type and amount and booked_date):
                 messagebox.showerror("Error", "All fields are required!")
                 return
-            available = self.get_availability_for_pass(pass_type)
-            if int(quantity) > available:
-                messagebox.showerror("Error", f"Cannot book more than {available} tickets for {pass_type}.")
-                return
+
             try:
+                quantity = int(quantity)
+                if quantity <= 0:
+                    messagebox.showerror("Error", "Quantity must be greater than 0!")
+                    return
+
+                # Check ticket availability
                 conn = sqlite3.connect('funpass.db')
                 cursor = conn.cursor()
-                cursor.execute('''INSERT INTO customers (ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type, employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (ticket_id, name, email, int(quantity), float(amount), booked_date, purchased_date, pass_type, self.employee_id))
+                
+                # Get employee's allocation
+                cursor.execute('''
+
+                    SELECT 
+                        CASE 
+                            WHEN ? = 'Express Pass' THEN express_pass
+                            WHEN ? = 'Junior Pass' THEN junior_pass
+                            WHEN ? = 'Regular Pass' THEN regular_pass
+                            WHEN ? = 'Student Pass' THEN student_pass
+                            WHEN ? = 'PWD Pass' THEN pwd_pass
+                            WHEN ? = 'Senior Citizen Pass' THEN senior_citizen_pass
+                        END
+                    FROM employees 
+                    WHERE employee_id = ?
+                ''', (pass_type, pass_type, pass_type, pass_type, pass_type, pass_type, self.employee_id))
+                
+                allocation = cursor.fetchone()[0] or 0
+
+                # Get tickets already sold by this employee
+                cursor.execute('''
+
+                    SELECT SUM(quantity) 
+                    FROM customers 
+                    WHERE pass_type = ? AND employee_id = ?
+                ''', (pass_type, self.employee_id))
+                
+                sold = cursor.fetchone()[0] or 0
+                available = allocation - sold
+
+                if quantity > available:
+                    messagebox.showerror("Error", 
+                        f"Not enough tickets available!\nYou can only sell {available} more {pass_type} tickets.")
+                    conn.close()
+                    return
+
+                # If validation passes, proceed with saving
+                cursor.execute('''INSERT INTO customers 
+                                (ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type, employee_id) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                             (ticket_id, name, email, quantity, float(amount), booked_date, purchased_date, 
+                              pass_type, self.employee_id))
                 conn.commit()
                 conn.close()
                 dialog.destroy()
                 self.load_customers_data()
                 self.print_ticket(ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type)
                 messagebox.showinfo("Success", "Customer added and ticket printed!")
+            except ValueError:
+                messagebox.showerror("Error", "Invalid quantity or amount!")
             except Exception as e:
                 messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
         tk.Button(main_frame, text="Save", command=save_customer, bg='#4CAF50', fg='white').pack(pady=10)
         tk.Button(main_frame, text="Cancel", command=dialog.destroy, bg='#f44336', fg='white').pack()
 
@@ -641,91 +729,138 @@ class EmployeeDashboard:
         if not selected:
             messagebox.showwarning("No Selection", "Please select a customer to edit.")
             return
+
         values = self.customers_tree.item(selected[0])['values']
         dialog = tk.Toplevel(self.root)
         dialog.title("Edit Customer")
-        dialog.geometry("500x600")
+        dialog.geometry("500x650")
         dialog.configure(bg='white')
+        
         main_frame = tk.Frame(dialog, bg='white', padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        
+
+        # Ticket ID (read-only)
+        tk.Label(main_frame, text="Ticket ID:", font=('Arial', 11), bg='white').pack(anchor='w')
+        ticket_id_var = tk.StringVar(value=values[0])
+        ticket_id_entry = tk.Entry(main_frame, textvariable=ticket_id_var, font=('Arial', 11), state='readonly')
+        ticket_id_entry.pack(fill=tk.X, pady=(0, 10))
+
         # Name
         tk.Label(main_frame, text="Name:", font=('Arial', 11), bg='white').pack(anchor='w')
-        name_entry = tk.Entry(main_frame, font=('Arial', 11))
-        name_entry.insert(0, values[1])
+        name_var = tk.StringVar(value=values[1])
+        name_entry = tk.Entry(main_frame, textvariable=name_var, font=('Arial', 11))
         name_entry.pack(fill=tk.X, pady=(0, 10))
-        
+
         # Email
         tk.Label(main_frame, text="Email:", font=('Arial', 11), bg='white').pack(anchor='w')
-        email_entry = tk.Entry(main_frame, font=('Arial', 11))
-        email_entry.insert(0, values[2])
+        email_var = tk.StringVar(value=values[2])
+        email_entry = tk.Entry(main_frame, textvariable=email_var, font=('Arial', 11))
         email_entry.pack(fill=tk.X, pady=(0, 10))
-        
+
         # Quantity
         tk.Label(main_frame, text="Quantity:", font=('Arial', 11), bg='white').pack(anchor='w')
-        quantity_entry = tk.Entry(main_frame, font=('Arial', 11), name='quantity_entry')
-        quantity_entry.insert(0, values[3])
+        quantity_var = tk.StringVar(value=values[3])
+        quantity_entry = tk.Entry(main_frame, textvariable=quantity_var, font=('Arial', 11))
         quantity_entry.pack(fill=tk.X, pady=(0, 10))
-        
+
         # Pass Type
         tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
-        pass_type_combo = ttk.Combobox(main_frame, values=self.get_pass_types(), font=('Arial', 11), name='pass_type_combo')
-        pass_type_combo.set(values[7])
+        pass_type_var = tk.StringVar(value=values[7])
+        pass_type_combo = ttk.Combobox(main_frame, textvariable=pass_type_var, values=self.get_pass_types(), font=('Arial', 11))
         pass_type_combo.pack(fill=tk.X, pady=(0, 10))
-        
+
         # Amount
         tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
         amount_var = tk.StringVar(value=values[4])
-        amount_entry = tk.Entry(main_frame, font=('Arial', 11), textvariable=amount_var, state='readonly', name='amount_entry'
-        )
+        amount_entry = tk.Entry(main_frame, textvariable=amount_var, font=('Arial', 11))
         amount_entry.pack(fill=tk.X, pady=(0, 10))
-        
+
+        # Booked Date
         tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
         booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
-        booked_date_entry.set_date(values[5])
+        try:
+            date_obj = datetime.strptime(values[5], '%m/%d/%Y')
+            booked_date_entry.set_date(date_obj)
+        except ValueError:
+            pass
         booked_date_entry.pack(fill=tk.X, pady=(0, 10))
+
         # Purchased Date
         tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
-        purchased_date_label = tk.Label(main_frame, text=values[6], font=('Arial', 11), bg='white')
-        purchased_date_label.pack(fill=tk.X, pady=(0, 10))
+        purchased_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
+        try:
+            date_obj = datetime.strptime(values[6], '%m/%d/%Y')
+            purchased_date_entry.set_date(date_obj)
+        except ValueError:
+            pass
+        purchased_date_entry.pack(fill=tk.X, pady=(0, 10))
+
         def update_amount(*args):
             try:
-                pass_type = pass_type_combo.get()
-                quantity = int(quantity_entry.get())
-                # Always get fresh price from database
-                price = self.get_price_for_pass(pass_type)
-                amount = price * quantity
-                amount_var.set(f"{amount:.2f}")
-            except Exception:
+                pass_type = pass_type_var.get()
+                quantity = int(quantity_var.get())
+                if pass_type and quantity > 0:
+                    price = self.get_price_for_pass(pass_type)
+                    total = price * quantity
+                    amount_var.set(f"{total:.2f}")
+            except ValueError:
                 amount_var.set("")
-        
+
+        # Bind the update function to both pass type and quantity changes
         pass_type_combo.bind('<<ComboboxSelected>>', update_amount)
         quantity_entry.bind('<KeyRelease>', update_amount)
+
         def save_edit():
-            name = name_entry.get().strip()
-            email = email_entry.get().strip()
-            quantity = quantity_entry.get().strip()
-            pass_type = pass_type_combo.get().strip()
+            # Get values from the entries
+            name = name_var.get().strip()
+            email = email_var.get().strip()
+            quantity = quantity_var.get().strip()
             amount = amount_var.get().strip()
-            booked_date = booked_date_entry.get()
-            purchased_date = purchased_date_label.cget('text')
-            if not (name and email and quantity and pass_type and amount and booked_date and purchased_date):
+            pass_type = pass_type_var.get().strip()
+            
+            try:
+                booked_date = booked_date_entry.get_date().strftime('%Y-%m-%d')
+                purchased_date = purchased_date_entry.get_date().strftime('%Y-%m-%d')
+            except AttributeError:
+                messagebox.showerror("Error", "Invalid date format!")
+                return
+
+            # Validate fields
+            if not all([name, email, quantity, amount, pass_type, booked_date, purchased_date]):
                 messagebox.showerror("Error", "All fields are required!")
                 return
+
             try:
                 conn = sqlite3.connect('funpass.db')
                 cursor = conn.cursor()
-                cursor.execute('''UPDATE customers SET name=?, email=?, quantity=?, amount=?, booked_date=?, purchased_date=? WHERE ticket_id=? AND employee_id=?''',
-                    (name, email, int(quantity), float(amount), booked_date, purchased_date, values[0], self.employee_id))
+                cursor.execute('''
+                    UPDATE customers 
+                    SET name=?, email=?, quantity=?, amount=?, 
+                        booked_date=?, purchased_date=?, pass_type=?
+                    WHERE ticket_id=?
+                ''', (name, email, int(quantity), float(amount), 
+                     booked_date, purchased_date, pass_type, ticket_id_var.get()))
                 conn.commit()
                 conn.close()
                 dialog.destroy()
                 self.load_customers_data()
-                messagebox.showinfo("Success", "Customer updated!")
+                messagebox.showinfo("Success", "Customer updated successfully!")
             except Exception as e:
                 messagebox.showerror("Error", f"An error occurred: {str(e)}")
-        tk.Button(main_frame, text="Save", command=save_edit, bg='#4CAF50', fg='white').pack(pady=10)
-        tk.Button(main_frame, text="Cancel", command=dialog.destroy, bg='#f44336', fg='white').pack()
+
+        # Button frame for Save and Cancel
+        button_frame = tk.Frame(main_frame, bg='white')
+        button_frame.pack(pady=20)
+
+        # Save button 
+        save_btn = tk.Button(button_frame, text="Save", command=save_edit, 
+                            bg='#4CAF50', fg='white', width=10)
+        save_btn.pack(side=tk.LEFT, padx=5)
+
+        # Cancel button
+        cancel_btn = tk.Button(button_frame, text="Cancel", command=dialog.destroy,
+                              bg='#f44336', fg='white', width=10) 
+        cancel_btn.pack(side=tk.LEFT, padx=5)
 
     def delete_customer(self):
         selected = self.customers_tree.selection()
@@ -758,25 +893,12 @@ class EmployeeDashboard:
         return pass_types
 
     def get_price_for_pass(self, pass_type):
-        """Get fresh price from database with caching for performance"""
-        # Check cache first
-        if pass_type in self._price_cache:
-            return self._price_cache[pass_type]
-
-        # Get fresh price from database
         conn = sqlite3.connect('funpass.db')
-        try:
-            cursor = conn.cursor()
-            cursor.execute('SELECT price FROM pricing WHERE pass_type=?', (pass_type,))
-            row = cursor.fetchone()
-            if row:
-                price = float(row[0])
-                # Cache the price
-                self._price_cache[pass_type] = price
-                return price
-            return 0.0
-        finally:
-            conn.close()
+        cursor = conn.cursor()
+        cursor.execute('SELECT price FROM pricing WHERE pass_type=?', (pass_type,))
+        row = cursor.fetchone()
+        conn.close()
+        return float(row[0]) if row else 0.0
 
     def print_ticket(self, ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type):
         print_win = tk.Toplevel(self.root)
@@ -917,8 +1039,8 @@ class EmployeeDashboard:
             cursor.execute('''
                 SELECT ticket_id, name, email, reasons, quantity, 
                        amount, pass_type,
-                       strftime('%m/%d/%Y', booked_date) as booked_date,
-                       strftime('%m/%d/%Y', purchased_date) as purchased_date,
+                       strftime('%Y-%m-%d', booked_date) as booked_date,
+                       strftime('%Y-%m-%d', purchased_date) as purchased_date,
                        status
                 FROM cancellations
             ''')
@@ -927,7 +1049,26 @@ class EmployeeDashboard:
 
             # Insert data into treeview
             for cancellation in cancellations:
-                self.cancellations_tree.insert('', tk.END, values=cancellation)
+                # Convert tuple to list for modification
+                data_list = list(cancellation)
+                
+                # Format dates if they exist (positions 7 and 8 in the list)
+                if data_list[7]:  # booked_date
+                    try:
+                        date_obj = datetime.strptime(data_list[7], '%Y-%m-%d')
+                        data_list[7] = date_obj.strftime('%m/%d/%Y')
+                    except ValueError:
+                        pass
+                        
+                if data_list[8]:  # purchased_date
+                    try:
+                        date_obj = datetime.strptime(data_list[8], '%Y-%m-%d')
+                        data_list[8] = date_obj.strftime('%m/%d/%Y')
+                    except ValueError:
+                        pass
+
+                # Insert the formatted data into treeview
+                self.cancellations_tree.insert('', tk.END, values=data_list)
 
         except Exception as e:
             messagebox.showerror("Database Error", f"Error loading cancellation data: {str(e)}")
@@ -1031,17 +1172,34 @@ class EmployeeDashboard:
             reasons = reasons_entry.get().strip()
             quantity = quantity_entry.get().strip()
             amount = amount_entry.get().strip()
-            booked_date = booked_date_entry.get()
-            purchased_date = purchased_date_entry.get()
+            
+            # Format dates correctly
+            try:
+                booked_date = booked_date_entry.get_date().strftime('%Y-%m-%d')
+                purchased_date = purchased_date_entry.get_date().strftime('%Y-%m-%d')
+            except AttributeError:
+                messagebox.showerror("Error", "Invalid date format!")
+                return
+
             pass_type = pass_type_combo.get().strip()
+
             if not (ticket_id and name and email and reasons and quantity and amount and booked_date and purchased_date and pass_type):
                 messagebox.showerror("Error", "All fields are required!")
                 return
+
             try:
                 conn = sqlite3.connect('funpass.db')
                 cursor = conn.cursor()
-                cursor.execute('''INSERT INTO cancellations (ticket_id, name, email, reasons, quantity, amount, booked_date, purchased_date, pass_type, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (ticket_id, name, email, reasons, int(quantity), float(amount), booked_date, purchased_date, pass_type, 'Pending'))
+                cursor.execute('''
+                    INSERT INTO cancellations 
+                    (ticket_id, name, email, reasons, quantity, amount, booked_date, purchased_date, pass_type, status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    ticket_id, name, email, reasons, 
+                    int(quantity), float(amount), 
+                    booked_date, purchased_date,
+                    pass_type, 'Pending'
+                ))
                 conn.commit()
                 conn.close()
                 dialog.destroy()
@@ -1049,6 +1207,7 @@ class EmployeeDashboard:
                 messagebox.showinfo("Success", "Cancellation request added!")
             except Exception as e:
                 messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
         tk.Button(main_frame, text="Save", command=save_cancellation, bg='#4CAF50', fg='white').pack(pady=10)
         tk.Button(main_frame, text="Cancel", command=dialog.destroy, bg='#f44336', fg='white').pack()
 
@@ -1096,10 +1255,10 @@ class EmployeeDashboard:
         quantity_entry = tk.Entry(main_frame, textvariable=quantity_var, font=('Arial', 11))
         quantity_entry.pack(fill=tk.X, pady=(0, 10))
 
-        # Amount
+        # Amount (now editable)
         tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
         amount_var = tk.StringVar(value=values[5])
-        amount_entry = tk.Entry(main_frame, textvariable=amount_var, font=('Arial', 11))
+        amount_entry = tk.Entry(main_frame, textvariable=amount_var, font=('Arial', 11))  # Removed readonly state
         amount_entry.pack(fill=tk.X, pady=(0, 10))
 
         # Pass Type
@@ -1108,43 +1267,70 @@ class EmployeeDashboard:
         pass_type_combo = ttk.Combobox(main_frame, textvariable=pass_type_var, values=self.get_pass_types(), font=('Arial', 11))
         pass_type_combo.pack(fill=tk.X, pady=(0, 10))
 
-        # Booked Date
+        # Booked Date (now editable)
         tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
         booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
-        booked_date_entry.set_date(values[7])
+        try:
+            date_obj = datetime.strptime(values[7], '%m/%d/%Y')
+            booked_date_entry.set_date(date_obj)
+        except ValueError:
+            pass
         booked_date_entry.pack(fill=tk.X, pady=(0, 10))
 
-        # Purchased Date
+        # Purchased Date (now editable)
         tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
         purchased_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
-        purchased_date_entry.set_date(values[8])
+        try:
+            date_obj = datetime.strptime(values[8], '%m/%d/%Y')
+            purchased_date_entry.set_date(date_obj)
+        except ValueError:
+            pass
         purchased_date_entry.pack(fill=tk.X, pady=(0, 10))
 
+        def update_amount(*args):
+            try:
+                pass_type = pass_type_var.get()
+                quantity = int(quantity_var.get())
+                if pass_type and quantity > 0:
+                    price = self.get_price_for_pass(pass_type)
+                    total = price * quantity
+                    amount_var.set(f"{total:.2f}")
+            except ValueError:
+                amount_var.set("")
+
+        # Bind the update function to both pass type and quantity changes
+        pass_type_combo.bind('<<ComboboxSelected>>', update_amount)
+        quantity_entry.bind('<KeyRelease>', update_amount)
+
         def save_edit():
-            if not (name_var.get().strip() and email_var.get().strip() and 
-                   reasons_text.get("1.0", tk.END).strip() and quantity_var.get().strip() and 
-                   amount_var.get().strip() and pass_type_var.get().strip()):
+            name = name_var.get().strip()
+            email = email_var.get().strip()
+            reasons = reasons_text.get('1.0', 'end-1c').strip()
+            quantity = quantity_var.get().strip()
+            amount = amount_var.get().strip()
+            pass_type = pass_type_var.get().strip()
+            
+            try:
+                booked_date = booked_date_entry.get_date().strftime('%Y-%m-%d')
+                purchased_date = purchased_date_entry.get_date().strftime('%Y-%m-%d')
+            except AttributeError:
+                messagebox.showerror("Error", "Invalid date format!")
+                return
+
+            if not all([name, email, reasons, quantity, amount, pass_type, booked_date, purchased_date]):
                 messagebox.showerror("Error", "All fields are required!")
                 return
+
             try:
                 conn = sqlite3.connect('funpass.db')
                 cursor = conn.cursor()
                 cursor.execute('''
                     UPDATE cancellations 
                     SET name=?, email=?, reasons=?, quantity=?, amount=?, 
-                        booked_date=?, purchased_date=?, pass_type=?
+                        pass_type=?, booked_date=?, purchased_date=?, status=?
                     WHERE ticket_id=?
-                ''', (
-                    name_var.get().strip(),
-                    email_var.get().strip(),
-                    reasons_text.get("1.0", tk.END).strip(),
-                    int(quantity_var.get().strip()),
-                    float(amount_var.get().strip()),
-                    booked_date_entry.get(),
-                    purchased_date_entry.get(),
-                    pass_type_var.get().strip(),
-                    ticket_id_var.get()
-                ))
+                ''', (name, email, reasons, quantity, amount, pass_type, 
+                     booked_date, purchased_date, 'Pending', ticket_id_var.get()))
                 conn.commit()
                 conn.close()
                 dialog.destroy()
@@ -1153,27 +1339,38 @@ class EmployeeDashboard:
             except Exception as e:
                 messagebox.showerror("Error", f"An error occurred: {str(e)}")
 
-        # Save and Cancel buttons
+        # Button frame for Save and Cancel
         button_frame = tk.Frame(main_frame, bg='white')
-        button_frame.pack(fill=tk.X, pady=(20, 0))
-        tk.Button(button_frame, text="Save", command=save_edit, bg='#4CAF50', fg='white', width=15).pack(side=tk.LEFT, padx=5)
-        tk.Button(button_frame, text="Cancel", command=dialog.destroy, bg='#f44336', fg='white', width=15).pack(side=tk.RIGHT, padx=5)
+        button_frame.pack(pady=20)
+
+        # Save button 
+        save_btn = tk.Button(button_frame, text="Save", command=save_edit, 
+                            bg='#4CAF50', fg='white', width=10)
+        save_btn.pack(side=tk.LEFT, padx=5)
+
+        # Cancel button
+        cancel_btn = tk.Button(button_frame, text="Cancel", command=dialog.destroy,
+                              bg='#f44336', fg='white', width=10) 
+        cancel_btn.pack(side=tk.LEFT, padx=5)
 
     def delete_cancellation(self):
         selected = self.cancellations_tree.selection()
         if not selected:
             messagebox.showwarning("No Selection", "Please select a request to delete.")
             return
+
         values = self.cancellations_tree.item(selected[0])['values']
+        
         if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this request?"):
             try:
                 conn = sqlite3.connect('funpass.db')
                 cursor = conn.cursor()
-                cursor.execute('DELETE FROM cancellations WHERE ticket_id=?', (values[1],))
+                # Fix: Use values[0] which is the ticket_id (first column) instead of values[1]
+                cursor.execute('DELETE FROM cancellations WHERE ticket_id=?', (values[0],))
                 conn.commit()
                 conn.close()
                 self.load_cancellations_data()
-                messagebox.showinfo("Success", "Request deleted!")
+                messagebox.showinfo("Success", "Request deleted successfully!")
             except Exception as e:
                 messagebox.showerror("Error", f"An error occurred: {str(e)}")
 
