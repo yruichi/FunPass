@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkcalendar import DateEntry
 import pandas as pd
+import time  # Add time module import
 from shared import create_database, BaseWindow
 
 # database setup
@@ -101,125 +102,17 @@ def create_database():
     conn.commit()
     conn.close()
 
-class LoginPage:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("FunPass - Login")
-        self.root.geometry("800x600")
-        self.root.configure(bg='white')
-
-        # Center the window
-        self.center_window()
-
-        # Create main frame
-        self.main_frame = tk.Frame(self.root, bg='white')
-        self.main_frame.pack(expand=True)
-
-        # Load and display logo
-        try:
-            logo_path = "C:/Users/MicaellaEliab/Downloads/FunPassProjectA/FunPass__1_-removebg-preview.png"
-            logo_img = Image.open(logo_path)
-            logo_width = 300
-            aspect_ratio = logo_img.height / logo_img.width
-            logo_height = int(logo_width * aspect_ratio)
-            logo_img = logo_img.resize((logo_width, logo_height))
-            
-            self.logo = ImageTk.PhotoImage(logo_img)
-            logo_label = tk.Label(self.main_frame, image=self.logo, bg='white')
-            logo_label.pack(pady=20)
-        except Exception as e:
-            print(f"Error loading logo: {e}")
-
-        # Create login form
-        self.create_login_form()
-
-    def center_window(self):
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        window_width = 800
-        window_height = 600
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
-        self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-
-    def create_login_form(self):
-        # Username field
-        tk.Label(self.main_frame, text="Admin Username:", bg='white').pack(pady=5)
-        self.username_entry = tk.Entry(self.main_frame)
-        self.username_entry.pack(pady=5)
-
-        # Password field
-        tk.Label(self.main_frame, text="Password:", bg='white').pack(pady=5)
-        self.password_entry = tk.Entry(self.main_frame, show="*")
-        self.password_entry.pack(pady=5)
-
-        # Show/Hide password checkbox
-        self.show_password = tk.BooleanVar()
-        tk.Checkbutton(self.main_frame, text="Show Password", 
-                      variable=self.show_password,
-                      command=self.toggle_password_visibility,
-                      bg='white').pack(pady=5)
-
-        # Login button
-        tk.Button(self.main_frame, text="Login", command=self.login,
-                 bg='#4CAF50', fg='white', width=20).pack(pady=20)
-
-    def toggle_password_visibility(self):
-        if self.show_password.get():
-            self.password_entry.config(show="")
-        else:
-            self.password_entry.config(show="*")
-
-    def login(self):
-        username = self.username_entry.get().strip()
-        password = self.password_entry.get().strip()
-
-        if not username or not password:
-            messagebox.showwarning("Invalid Input", "Please enter both username and password")
-            return
-
-        conn = sqlite3.connect('funpass.db')
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute('SELECT * FROM admin WHERE username = ? AND password = ?',
-                         (username, password))
-            admin = cursor.fetchone()
-            if admin:
-                self.root.withdraw()  # Hide login window
-                admin_root = tk.Toplevel()
-                AdminDashboard(admin_root)
-                admin_root.protocol("WM_DELETE_WINDOW", 
-                                 lambda: self.on_closing(admin_root))
-            else:
-                messagebox.showerror("Login Failed", "Invalid admin credentials")
-        except Exception as e:
-            messagebox.showerror("Error", f"An error occurred: {str(e)}")
-        finally:
-            conn.close()
-
-    def on_closing(self, window):
-        window.destroy()
-        self.root.deiconify()  # Show login window again
-
 class AdminDashboard:
     def __init__(self, root):
         self.root = root
         self.root.title("FunPass - Admin Dashboard")
         self.root.state('zoomed')
-        
-        # to create main container with grid
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(1, weight=1)
-
-        # to create sidebar
+        self.price_entries = {}  # Initialize price entries dictionary
         self.create_sidebar()
-
-        # to create main content area
         self.content_frame = tk.Frame(self.root, bg='white')
         self.content_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
-
-        # to show dashboard by default
         self.show_dashboard()
 
     def create_sidebar(self):
@@ -299,7 +192,6 @@ class AdminDashboard:
         # to create statistics overview section
         stats_frame = tk.LabelFrame(self.content_frame, text="Overview", 
                                   bg='white', font=('Arial', 12, 'bold'))
-        stats_frame.pack(fill=tk.X, pady=10, padx=5)
 
         # to create a grid for statistics
         for i in range(2):
@@ -374,9 +266,13 @@ class AdminDashboard:
     def update_time(self):
         try:
             current = datetime.now()
-            current_time = current.strftime("%Y-%m-%d %H:%M:%S")
-            if hasattr(self, 'time_label'):
-                self.time_label.config(text=current_time)
+            # Format: "Wednesday, June 6, 2025, 2025-06-11 time"
+            if hasattr(self, 'date_label'):
+                weekday_date = current.strftime("%A, %B %d, %Y")
+                iso_date = current.strftime("%Y-%m-%d")
+                time_str = current.strftime("%H:%M:%S")
+                full_date = f"{weekday_date}, {iso_date} {time_str}"
+                self.date_label.config(text=full_date)
             self.root.after(1000, self.update_time)
         except Exception as e:
             print(f"Error updating time: {e}")
@@ -612,26 +508,27 @@ class AdminDashboard:
 
     def show_employee_management(self):
         self.clear_content()
+        emp_title = tk.Label(self.content_frame, text="Employee Management", font=('Arial', 16, 'bold'), bg='white', anchor='w')
+        emp_title.pack(pady=(10, 0), padx=20, anchor='w')
+        emp_subtitle = tk.Label(self.content_frame, text="View, Add, Edit, and Delete Employees", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
+        emp_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
 
-        # to add employee management title above search
-        emp_mgmt_title = tk.Label(self.content_frame, text="Employees", font=('Arial', 16, 'bold'), bg='white', anchor='w')
-        emp_mgmt_title.pack(pady=(10, 0), padx=20, anchor='w')
-        emp_mgmt_subtitle = tk.Label(self.content_frame, text="View and Manage Employees", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
-        emp_mgmt_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
-
-        # to create top controls frame
         controls_frame = tk.Frame(self.content_frame, bg='white')
         controls_frame.pack(fill=tk.X, pady=10)
 
-        # to create search frame
-        search_frame = tk.Frame(controls_frame, bg='white')
-        search_frame.pack(side=tk.LEFT)
-        
-        tk.Label(search_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
+        # Search and sort beside each other
+        search_sort_frame = tk.Frame(controls_frame, bg='white')
+        search_sort_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Label(search_sort_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
         self.emp_search_var = tk.StringVar()
         self.emp_search_var.trace('w', self.search_employees)
-        search_entry = tk.Entry(search_frame, textvariable=self.emp_search_var)
+        search_entry = tk.Entry(search_sort_frame, textvariable=self.emp_search_var, font=('Arial', 11), width=40)
         search_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(search_sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
+        sort_options = ttk.Combobox(search_sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Username (A-Z)", "Username (Z-A)"])
+        sort_options.pack(side=tk.LEFT, padx=5)
+        sort_options.set("Name (A-Z)")
+        sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_employees(sort_options.get()))
 
         # to create buttons frame
         buttons_frame = tk.Frame(controls_frame, bg='white')
@@ -846,126 +743,78 @@ class AdminDashboard:
 
     def show_customers(self):
         self.clear_content()
-        
-        # to add customer title and subtitle
-        customer_title = tk.Label(self.content_frame, text="Customer", font=('Arial', 16, 'bold'), bg='white', anchor='w')
+        customer_title = tk.Label(self.content_frame, text="Customers", font=('Arial', 16, 'bold'), bg='white', anchor='w')
         customer_title.pack(pady=(10, 0), padx=20, anchor='w')
-        customer_subtitle = tk.Label(self.content_frame, text="View and Search for Customers", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
+        customer_subtitle = tk.Label(self.content_frame, text="View All Customers and Ticket Sales", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
         customer_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
 
-        # to create top controls frame
         controls_frame = tk.Frame(self.content_frame, bg='white')
         controls_frame.pack(fill=tk.X, pady=10)
 
-        # to add search functionality
-        search_frame = tk.Frame(controls_frame, bg='white')
-        search_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        tk.Label(search_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
+        # Search and sort beside each other
+        search_sort_frame = tk.Frame(controls_frame, bg='white')
+        search_sort_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Label(search_sort_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
         self.search_var = tk.StringVar()
         self.search_var.trace('w', self.search_customers)
-        search_entry = tk.Entry(search_frame, textvariable=self.search_var, 
-                              font=('Arial', 11), width=40)
+        search_entry = tk.Entry(search_sort_frame, textvariable=self.search_var, font=('Arial', 11), width=40)
         search_entry.pack(side=tk.LEFT, padx=5)
-
-        # to add sort options
-        sort_frame = tk.Frame(controls_frame, bg='white')
-        sort_frame.pack(side=tk.RIGHT)
-
-        tk.Label(sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
-        sort_options = ttk.Combobox(sort_frame, 
-                                  values=["Name (A-Z)", "Name (Z-A)", 
-                                        "Date (Newest)", "Date (Oldest)"])
+        tk.Label(search_sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
+        sort_options = ttk.Combobox(search_sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"])
         sort_options.pack(side=tk.LEFT, padx=5)
         sort_options.set("Name (A-Z)")
+        sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_customers(sort_options.get()))
 
-        # to create customers table
-        columns = ('Ticket ID', 'Name', 'Email', 'Quantity', 'Amount', 
-                  'Booked Date', 'Purchased Date', 'Employee')
-        self.customers_tree = ttk.Treeview(self.content_frame, columns=columns, 
-                                         show='headings')
-        
+        columns = ('Ticket ID', 'Name', 'Email', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Employee')
+        self.customers_tree = ttk.Treeview(self.content_frame, columns=columns, show='headings')
         for col in columns:
             self.customers_tree.heading(col, text=col)
             self.customers_tree.column(col, width=120)
-
         self.customers_tree.pack(fill=tk.BOTH, expand=True, pady=10)
-
-        # to add scrollbar
-        scrollbar = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, 
-                                command=self.customers_tree.yview)
+        scrollbar = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, command=self.customers_tree.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.customers_tree.configure(yscrollcommand=scrollbar.set)
-
-        # to bind sort event
-        sort_options.bind('<<ComboboxSelected>>', 
-                        lambda e: self.sort_customers(sort_options.get()))
-
-        # to load initial data
         self.load_customers_data()
 
     def search_customers(self, *args):
         search_text = self.search_var.get().lower()
-
-        # to clear current display
         for item in self.customers_tree.get_children():
             self.customers_tree.delete(item)
-
-        # to get all customers from database
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM customers')
+        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.quantity, c.amount, c.booked_date, c.purchased_date, IFNULL(e.name, '') as employee_name FROM customers c LEFT JOIN employees e ON c.employee_id = e.employee_id''')
         customers = cursor.fetchall()
         conn.close()
-
-        # to filter and display matching customers
         for customer in customers:
-            # to search in all fields
             if any(search_text in str(value).lower() for value in customer):
                 self.customers_tree.insert('', tk.END, values=customer)
 
     def sort_customers(self, sort_option):
-        # to get all items
         items = []
         for item in self.customers_tree.get_children():
             values = self.customers_tree.item(item)['values']
             items.append(values)
-
-        # to sort based on selected option
         if sort_option == "Name (A-Z)":
-            items.sort(key=lambda x: x[1])  # to sort by name ascending
+            items.sort(key=lambda x: x[1])
         elif sort_option == "Name (Z-A)":
-            items.sort(key=lambda x: x[1], reverse=True)  # to sort by name descending
+            items.sort(key=lambda x: x[1], reverse=True)
         elif sort_option == "Date (Newest)":
-            items.sort(key=lambda x: x[6], reverse=True)  # to sort by purchase date newest
+            items.sort(key=lambda x: x[6], reverse=True)
         elif sort_option == "Date (Oldest)":
-            items.sort(key=lambda x: x[6])  # to sort by purchase date oldest
-
-        # to clear and reload table
+            items.sort(key=lambda x: x[6])
         for item in self.customers_tree.get_children():
             self.customers_tree.delete(item)
-        
         for item in items:
             self.customers_tree.insert('', tk.END, values=item)
 
     def load_customers_data(self):
-        # to clear existing items
         for item in self.customers_tree.get_children():
             self.customers_tree.delete(item)
-            
-        # to load from database
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT c.ticket_id, c.name, c.email, c.quantity, c.amount, c.booked_date, c.purchased_date, 
-                   IFNULL(e.name, '') as employee_name
-            FROM customers c
-            LEFT JOIN employees e ON c.employee_id = e.employee_id
-        ''')
+        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.quantity, c.amount, c.booked_date, c.purchased_date, IFNULL(e.name, '') as employee_name FROM customers c LEFT JOIN employees e ON c.employee_id = e.employee_id''')
         customers = cursor.fetchall()
         conn.close()
-        
-        # to insert into treeview
         for customer in customers:
             self.customers_tree.insert('', tk.END, values=customer)
 
@@ -992,16 +841,15 @@ class AdminDashboard:
         search_entry = tk.Entry(search_frame, textvariable=self.cancel_search_var, 
                               font=('Arial', 11), width=30)
         search_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(search_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
+        sort_options = ttk.Combobox(search_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)", "Status (A-Z)", "Status (Z-A)"])
+        sort_options.pack(side=tk.LEFT, padx=5)
+        sort_options.set("Name (A-Z)")
+        sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_cancellations(sort_options.get()))
 
         # to create buttons frame
         buttons_frame = tk.Frame(controls_frame, bg='white')
         buttons_frame.pack(side=tk.RIGHT, padx=10)
-
-        # to create view details button
-        view_btn = tk.Button(buttons_frame, text="View Details", 
-                           command=self.view_cancellation_details,
-                           bg='#2196F3', fg='white')
-        view_btn.pack(side=tk.LEFT, padx=5)
 
         # to create edit status button
         edit_btn = tk.Button(buttons_frame, text="Edit Status", 
@@ -1021,9 +869,23 @@ class AdminDashboard:
         self.cancellations_tree = ttk.Treeview(self.content_frame, columns=columns, 
                                               show='headings')
         
+        # Configure columns with custom widths and left alignment
+        column_widths = {
+            'Ticket ID': 100,
+            'Name': 150,
+            'Email': 200,
+            'Reason': 200,
+            'Quantity': 80,
+            'Amount': 100,
+            'Booked Date': 120,
+            'Purchased Date': 120,
+            'Status': 100
+        }
+        
         for col in columns:
             self.cancellations_tree.heading(col, text=col)
-            self.cancellations_tree.column(col, width=120)
+            width = column_widths.get(col, 120)  # default to 120 if not specified
+            self.cancellations_tree.column(col, width=width, anchor='w')
 
         self.cancellations_tree.pack(fill=tk.BOTH, expand=True, pady=10)
 
@@ -1035,51 +897,6 @@ class AdminDashboard:
 
         # to load initial data
         self.load_cancellations_data()
-
-    def view_cancellation_details(self):
-        selected_item = self.cancellations_tree.selection()
-        if not selected_item:
-            messagebox.showwarning("No Selection", "Please select a cancellation to view.")
-            return
-
-        # to get selected cancellation details
-        values = self.cancellations_tree.item(selected_item[0])['values']
-
-        # to create details window
-        details_window = tk.Toplevel(self.root)
-        details_window.title("Cancellation Details")
-        details_window.geometry("500x600")
-        details_window.configure(bg='white')
-
-        # to create details frame
-        details_frame = tk.Frame(details_window, bg='white', padx=20, pady=20)
-        details_frame.pack(fill=tk.BOTH, expand=True)
-
-        # to create details labels
-        fields = [
-            ("Ticket ID:", values[0]),
-            ("Name:", values[1]),
-            ("Email:", values[2]),
-            ("Reason for Cancellation:", values[3]),
-            ("Quantity:", values[4]),
-            ("Amount:", f"₱{values[5]:,.2f}"),
-            ("Booked Date:", values[6]),
-            ("Purchased Date:", values[7]),
-            ("Current Status:", values[8])
-        ]
-
-        for label, value in fields:
-            frame = tk.Frame(details_frame, bg='white')
-            frame.pack(fill=tk.X, pady=5)
-            
-            tk.Label(frame, text=label, font=('Arial', 11, 'bold'), 
-                    bg='white').pack(side=tk.LEFT)
-            tk.Label(frame, text=str(value), font=('Arial', 11), 
-                    bg='white').pack(side=tk.LEFT, padx=10)
-
-        # to create close button
-        tk.Button(details_frame, text="Close", command=details_window.destroy,
-                 bg='#2196F3', fg='white', font=('Arial', 11)).pack(pady=20)
 
     def edit_cancellation_status(self):
         selected_item = self.cancellations_tree.selection()
@@ -1195,24 +1012,24 @@ class AdminDashboard:
                 self.cancellations_tree.insert('', tk.END, values=cancellation)
 
     def sort_cancellations(self, sort_option):
-        # to get all items
         items = []
         for item in self.cancellations_tree.get_children():
             values = self.cancellations_tree.item(item)['values']
             items.append(values)
-
-        # to sort based on selected option
         if sort_option == "Name (A-Z)":
-            items.sort(key=lambda x: x[1])  # to sort by name ascending
+            items.sort(key=lambda x: x[1])
         elif sort_option == "Name (Z-A)":
-            items.sort(key=lambda x: x[1], reverse=True)  # to sort by name descending
+            items.sort(key=lambda x: x[1], reverse=True)
         elif sort_option == "Date (Newest)":
-            items.sort(key=lambda x: x[7], reverse=True)  # to sort by purchase date newest
+            items.sort(key=lambda x: x[7], reverse=True)
         elif sort_option == "Date (Oldest)":
-            items.sort(key=lambda x: x[7])  # to
+            items.sort(key=lambda x: x[7])
+        elif sort_option == "Status (A-Z)":
+            items.sort(key=lambda x: x[8])
+        elif sort_option == "Status (Z-A)":
+            items.sort(key=lambda x: x[8], reverse=True)
         for item in self.cancellations_tree.get_children():
             self.cancellations_tree.delete(item)
-        
         for item in items:
             self.cancellations_tree.insert('', tk.END, values=item)
 
@@ -1224,7 +1041,13 @@ class AdminDashboard:
         # to load from database
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM cancellations')
+        cursor.execute('''
+            SELECT 
+                ticket_id, name, email, reasons, quantity, amount,
+                booked_date, purchased_date, status
+            FROM cancellations
+            ORDER BY id DESC
+        ''')
         cancellations = cursor.fetchall()
         conn.close()
         
@@ -1235,57 +1058,97 @@ class AdminDashboard:
     def show_pricing(self):
         self.clear_content()
         
-        # to add pass type pricing title and subtitle
+        # Add pass type pricing title and subtitle
         pricing_title = tk.Label(self.content_frame, text="Pass Type Pricing", font=('Arial', 16, 'bold'), bg='white', anchor='w')
         pricing_title.pack(pady=(10, 0), padx=20, anchor='w')
+        
+        self.price_update_label = tk.Label(self.content_frame, text="", font=('Arial', 10), fg='#4CAF50', bg='white', anchor='w')
+        self.price_update_label.pack(pady=(5, 0), padx=20, anchor='w')
+        
         pricing_subtitle = tk.Label(self.content_frame, text="View and Manage Ticketing Pricing", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
         pricing_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
 
-        # to create main frame for pricing
+        # Create main frame for pricing
         main_frame = tk.Frame(self.content_frame, bg='white')
         main_frame.pack(fill=tk.BOTH, expand=True, padx=50, pady=20)
 
-        # to get current prices from database
+        # Get current prices from database
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM pricing')
         prices = cursor.fetchall()
         conn.close()
 
-        # to store entry widgets
+        # Store entry widgets
         self.price_entries = {}
 
-        # to create price editing interface
+        # Create price editing interface
         for pass_type, current_price in prices:
-            # to create frame for each row
-            row = tk.Frame(main_frame, bg='white')
+            # Create frame for each row
+            row = tk.Frame(main_frame, bg='white', name=f"price_row_{pass_type.replace(' ', '_').lower()}")
             row.pack(fill=tk.X, pady=10)
 
-            # to create pass type label (left-aligned)
+            # Create pass type label (left-aligned)
             label = tk.Label(row, text=pass_type, font=('Arial', 12), bg='white',
                            width=20, anchor='w')
             label.pack(side=tk.LEFT, padx=(20, 10))
 
-            # to create price entry with currency symbol
+            # Create price entry with currency symbol
             price_frame = tk.Frame(row, bg='white')
             price_frame.pack(side=tk.LEFT)
 
             currency_label = tk.Label(price_frame, text="₱", font=('Arial', 12), bg='white')
             currency_label.pack(side=tk.LEFT, padx=(0, 5))
 
-            price_var = tk.StringVar(value=f"{current_price:.2f}")
+            # Create StringVar with initial formatted price
+            price_var = tk.StringVar(value=f"{float(current_price):.2f}")
+            
+            # Add validation to only allow numbers and decimal point
+            def validate_price(action, value_if_allowed):
+                if action == '1':  # Insert
+                    if value_if_allowed == "":
+                        return True
+                    try:
+                        # Remove commas for validation
+                        cleaned_value = value_if_allowed.replace(',', '')
+                        # Allow numbers, single decimal point, and optional negative sign
+                        if cleaned_value.count('.') <= 1 and cleaned_value.replace('.', '').replace('-', '', 1).isdigit():
+                            # Don't allow just a decimal point or negative sign
+                            if cleaned_value not in ['.', '-']:
+                                return True
+                    except ValueError:
+                        pass
+                    return False
+                return True
+
             entry = tk.Entry(price_frame, textvariable=price_var, 
                            font=('Arial', 12), width=10,
-                           justify='right')
+                           justify='right',
+                           name=f"price_entry_{pass_type.replace(' ', '_').lower()}")
             entry.pack(side=tk.LEFT)
             
             self.price_entries[pass_type] = price_var
+            
+            vcmd = (entry.register(validate_price), '%d', '%P')
+            entry.configure(validate="key", validatecommand=vcmd)
 
-        # to create buttons frame
+            # Add immediate feedback on invalid input
+            def on_invalid_input(event):
+                widget = event.widget
+                if widget.get():
+                    try:
+                        float(widget.get().replace(',', ''))
+                        widget.config(fg='black')
+                    except ValueError:
+                        widget.config(fg='red')
+            
+            entry.bind('<KeyRelease>', on_invalid_input)
+
+        # Create buttons frame
         btn_frame = tk.Frame(self.content_frame, bg='white')
         btn_frame.pack(pady=20)
 
-        # to create save button
+        # Create save button
         save_btn = tk.Button(btn_frame, text="Save Changes", 
                            command=self.save_prices,
                            bg='#4CAF50', fg='white', 
@@ -1293,7 +1156,7 @@ class AdminDashboard:
                            width=15, height=2)
         save_btn.pack(side=tk.LEFT, padx=10)
 
-        # to create reset button
+        # Create reset button
         reset_btn = tk.Button(btn_frame, text="Reset", 
                             command=self.reset_prices,
                             bg='#f44336', fg='white', 
@@ -1301,34 +1164,62 @@ class AdminDashboard:
                             width=15, height=2)
         reset_btn.pack(side=tk.LEFT, padx=10)
 
+        # Show last update time
+        self.price_update_label.config(text=f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
     def save_prices(self):
         try:
-            # to validate all prices are numeric and positive
+            # Validate that all prices are valid numbers and store them
+            new_prices = {}
             for pass_type, price_var in self.price_entries.items():
                 try:
-                    price = float(price_var.get())
+                    # Remove any commas and spaces from the price string
+                    price_str = price_var.get().replace(',', '').replace(' ', '')
+                    price = float(price_str)
                     if price < 0:
-                        raise ValueError
-                except ValueError:
-                    messagebox.showerror("Invalid Input", 
-                                       f"Please enter a valid positive number for {pass_type}")
-                    return
+                        raise ValueError(f"Price for {pass_type} cannot be negative")
+                    new_prices[pass_type] = price
+                except ValueError as e:
+                    messagebox.showerror("Invalid Input", str(e))
+                    return False
 
-            # to save to database
+            # Start database transaction
             conn = sqlite3.connect('funpass.db')
-            cursor = conn.cursor()
-            
-            for pass_type, price_var in self.price_entries.items():
-                cursor.execute('UPDATE pricing SET price = ? WHERE pass_type = ?',
-                             (float(price_var.get()), pass_type))
-            
-            conn.commit()
-            conn.close()
-            
-            messagebox.showinfo("Success", "Prices updated successfully!")
-        
-        except sqlite3.Error as e:
-            messagebox.showerror("Database Error", f"An error occurred: {str(e)}")
+            try:
+                cursor = conn.cursor()
+                # Begin transaction
+                cursor.execute('BEGIN')
+
+                for pass_type, price in new_prices.items():
+                    # Update price in database
+                    cursor.execute('UPDATE pricing SET price = ? WHERE pass_type = ?',
+                                 (price, pass_type))
+                    # Update the entry display with the formatted price
+                    self.price_entries[pass_type].set(f"{price:.2f}")
+                
+                # Commit transaction
+                conn.commit()
+
+                # Generate price update event
+                if hasattr(self, 'root') and self.root:
+                    print("Generating price update event")  # Debug print
+                    self.root.event_generate('<<PriceUpdate>>')
+                    print("Price update event generated successfully")  # Debug print
+                
+                messagebox.showinfo("Success", "Prices updated successfully!")
+                return True
+
+            except sqlite3.Error as e:
+                # Rollback on error
+                conn.rollback()
+                messagebox.showerror("Database Error", f"An error occurred: {str(e)}")
+                return False
+            finally:
+                conn.close()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"An unexpected error occurred: {str(e)}")
+            return False
 
     def reset_prices(self):
         if messagebox.askyesno("Confirm Reset", 
@@ -1342,12 +1233,12 @@ class AdminDashboard:
                 'PWD Pass': 900.00
             }
 
-            # to update entry fields
+            # Update entry fields
             for pass_type, price in default_prices.items():
                 if pass_type in self.price_entries:
                     self.price_entries[pass_type].set(f"{price:.2f}")
 
-            # to save to database
+            # Save to database
             try:
                 conn = sqlite3.connect('funpass.db')
                 cursor = conn.cursor()
@@ -1359,16 +1250,23 @@ class AdminDashboard:
                 conn.commit()
                 conn.close()
                 
+                # Notify employee dashboard to refresh prices
+                self.notify_price_update()
+                
                 messagebox.showinfo("Success", "Prices reset to default values!")
-            
             except sqlite3.Error as e:
                 messagebox.showerror("Database Error", f"An error occurred: {str(e)}")
+
+    def notify_price_update(self):
+        # Call refresh prices on all employee dashboards
+        if hasattr(self, 'root') and self.root:
+            self.root.event_generate('<<PriceUpdate>>')
 
     def logout(self):
         if messagebox.askyesno("Logout", "Are you sure you want to logout?"):
             self.root.destroy()
             root = tk.Tk()
-            LoginPage(root)
+            AdminDashboard(root)
             root.mainloop()
 
     def search_employees(self, *args):
@@ -1391,8 +1289,54 @@ class AdminDashboard:
             if any(search_text in str(value).lower() for value in employee):
                 self.emp_tree.insert('', tk.END, values=employee)
 
+    def sort_employees(self, sort_option):
+        items = []
+        for item in self.emp_tree.get_children():
+            values = self.emp_tree.item(item)['values']
+            items.append(values)
+
+        # Sort based on selected option
+        if sort_option == "Name (A-Z)":
+            items.sort(key=lambda x: x[1].lower() if x[1] else '')  # Sort by name
+        elif sort_option == "Name (Z-A)":
+            items.sort(key=lambda x: x[1].lower() if x[1] else '', reverse=True)
+        elif sort_option == "Username (A-Z)":
+            items.sort(key=lambda x: x[2].lower() if x[2] else '')  # Sort by username
+        elif sort_option == "Username (Z-A)":
+            items.sort(key=lambda x: x[2].lower() if x[2] else '', reverse=True)
+
+        # Clear and repopulate the tree
+        for item in self.emp_tree.get_children():
+            self.emp_tree.delete(item)
+            
+        for item in items:
+            self.emp_tree.insert('', tk.END, values=item)
+
+    def sort_employees(self, sort_option):
+        items = []
+        for item in self.emp_tree.get_children():
+            values = self.emp_tree.item(item)['values']
+            items.append(values)
+
+        # Sort based on selected option
+        if sort_option == "Name (A-Z)":
+            items.sort(key=lambda x: x[1].lower() if x[1] else '')  # Sort by name
+        elif sort_option == "Name (Z-A)":
+            items.sort(key=lambda x: x[1].lower() if x[1] else '', reverse=True)
+        elif sort_option == "Username (A-Z)":
+            items.sort(key=lambda x: x[2].lower() if x[2] else '')  # Sort by username
+        elif sort_option == "Username (Z-A)":
+            items.sort(key=lambda x: x[2].lower() if x[2] else '', reverse=True)
+
+        # Clear and repopulate the tree
+        for item in self.emp_tree.get_children():
+            self.emp_tree.delete(item)
+            
+        for item in items:
+            self.emp_tree.insert('', tk.END, values=item)
+
 if __name__ == "__main__":
     create_database()  # to initialize the database
     root = tk.Tk()
-    app = LoginPage(root)
+    app = AdminDashboard(root)
     root.mainloop()

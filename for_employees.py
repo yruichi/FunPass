@@ -1,0 +1,1177 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+from PIL import Image, ImageTk
+import sqlite3
+from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from tkcalendar import DateEntry
+import pandas as pd
+from shared import create_database, BaseWindow
+
+# database setup
+def create_database():
+    conn = sqlite3.connect('funpass.db')
+    cursor = conn.cursor()
+
+    # to create admin table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS admin (
+            username TEXT PRIMARY KEY,
+            password TEXT NOT NULL
+        )
+    ''')
+
+    # to insert default admin if not exists
+    cursor.execute('INSERT OR IGNORE INTO admin (username, password) VALUES (?, ?)',
+                  ('admin', 'admin123'))
+
+    # to create employees table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS employees (
+            employee_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            express_pass INTEGER DEFAULT 0,
+            junior_pass INTEGER DEFAULT 0,
+            regular_pass INTEGER DEFAULT 0,
+            student_pass INTEGER DEFAULT 0,
+            pwd_pass INTEGER DEFAULT 0,
+            senior_citizen_pass INTEGER DEFAULT 0
+        )
+    ''')
+
+    # to create customers table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS customers (
+            ticket_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            booked_date TEXT NOT NULL,
+            purchased_date TEXT NOT NULL,
+            pass_type TEXT NOT NULL,
+            employee_id INTEGER,
+            FOREIGN KEY (employee_id) REFERENCES employees (employee_id)
+        )
+    ''')
+
+    # to create cancellations table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cancellations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            reasons TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            booked_date TEXT NOT NULL,
+            purchased_date TEXT NOT NULL,
+            status TEXT DEFAULT 'Pending',
+            FOREIGN KEY (ticket_id) REFERENCES customers (ticket_id)
+        )
+    ''')
+
+    # to create pricing table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pricing (
+            pass_type TEXT PRIMARY KEY,
+            price REAL NOT NULL
+        )
+    ''')
+
+    # to insert or update default prices
+    default_prices = [
+        ('Express Pass', 2300.00),
+        ('Junior Pass', 900.00),
+        ('Regular Pass', 1300.00),
+        ('Student Pass', 1300.00),
+        ('Senior Citizen Pass', 900.00),
+        ('PWD Pass', 900.00)
+    ]
+    
+    cursor.executemany('''
+        INSERT OR REPLACE INTO pricing (pass_type, price)
+        VALUES (?, ?)
+    ''', default_prices)
+
+    conn.commit()
+    conn.close()
+
+class EmployeeDashboard:
+    def __init__(self, root, employee_id=1):
+        self.root = root
+        self.employee_id = employee_id
+        self.search_var = tk.StringVar()
+        self.search_var.trace('w', self.search_customers)
+        self.current_price_frame = None
+
+        # Initialize price cache
+        self._price_cache = {}
+        # Bind to price update event at root level
+        print("Binding to price update event")  # Debug print
+        self.root.bind('<<PriceUpdate>>', self.refresh_prices, add="+")
+        
+        self.setup_ui()
+
+    def setup_ui(self):
+        self.root.title("FunPass - Employee Dashboard")
+        self.root.state('zoomed')
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=1)
+        self.create_sidebar()
+        self.content_frame = tk.Frame(self.root, bg='white')
+        self.content_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.show_dashboard()
+
+    def create_sidebar(self):
+        sidebar = tk.Frame(self.root, bg='#ECCD93', width=350)
+        sidebar.grid(row=0, column=0, sticky="ns")
+        sidebar.grid_propagate(False)
+        try:
+            logo_path = "C:/Users/MicaellaEliab/Downloads/FunPassProjectA/FunPass__1_-removebg-preview.png"
+            logo_img = Image.open(logo_path)
+            logo_width = 220
+            aspect_ratio = logo_img.height / logo_img.width
+            logo_height = int(logo_width * aspect_ratio)
+            logo_img = logo_img.resize((logo_width, logo_height))
+            self.sidebar_logo = ImageTk.PhotoImage(logo_img)
+            logo_label = tk.Label(sidebar, image=self.sidebar_logo, bg='#ECCD93')
+            logo_label.pack(pady=20)
+        except Exception as e:
+            print(f"Error loading sidebar logo: {e}")
+        buttons = [
+            ("Dashboard", self.show_dashboard),
+            ("Rides", self.show_rides),
+            ("Customers", self.show_customers),
+            ("Cancellations & Refunds", self.show_cancellations),
+            ("Pricing", self.show_pricing),
+            ("Logout", self.logout)
+        ]
+        for text, command in buttons:
+            btn = tk.Button(sidebar, text=text, command=command,
+                          bg='#ECCD93', fg='black', font=('Arial', 10, 'bold'),
+                          bd=0, pady=15, width=20)
+            btn.pack(pady=2)
+            btn.bind('<Enter>', lambda e, btn=btn: btn.configure(bg='#ECCD93'))
+            btn.bind('<Leave>', lambda e, btn=btn: btn.configure(bg='#ECCD93'))
+
+    def clear_content(self):
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+
+    def show_dashboard(self):
+        self.clear_content()
+        dashboard_title = tk.Label(self.content_frame, text="Dashboard", font=('Arial', 18, 'bold'), bg='white', anchor='w')
+        dashboard_title.pack(pady=(10, 0), padx=20, anchor='w')
+        dashboard_subtitle = tk.Label(self.content_frame, text="Your Sales and Ticket Overview", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
+        dashboard_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
+
+        # Top bar with date and time
+        top_bar = tk.Frame(self.content_frame, bg='white')
+        top_bar.pack(fill=tk.X, pady=10)
+        time_frame = tk.Frame(top_bar, bg='white', relief='solid', bd=1)
+        time_frame.pack(side=tk.RIGHT, padx=20, pady=5)
+        self.date_label = tk.Label(time_frame, font=('Arial', 12, 'bold'), bg='white')
+        self.date_label.pack(side=tk.LEFT, padx=10)
+        self.time_label = tk.Label(time_frame, font=('Arial', 12), bg='white')
+        self.time_label.pack(side=tk.LEFT, padx=10)
+        self.update_time()
+
+        # Stats
+        stats_frame = tk.LabelFrame(self.content_frame, text="Overview", bg='white', font=('Arial', 12, 'bold'))
+        stats_frame.pack(fill=tk.X, pady=10, padx=5)
+        for i in range(2):
+            stats_frame.grid_columnconfigure(i, weight=1)
+
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        # Total sales for this employee
+        cursor.execute('SELECT SUM(amount) FROM customers WHERE employee_id=?', (self.employee_id,))
+        total_sales = cursor.fetchone()[0] or 0
+        # Total tickets sold for this employee
+        cursor.execute('SELECT SUM(quantity) FROM customers WHERE employee_id=?', (self.employee_id,))
+        total_tickets = cursor.fetchone()[0] or 0
+        conn.close()
+
+        stats_data = [
+            ("Total Sales", f"₱{total_sales:,.2f}", "#2196F3"),
+            ("Total Tickets Sold", f"{int(total_tickets)}", "#FF9800")
+        ]
+        for idx, (label, value, color) in enumerate(stats_data):
+            stat_card = tk.Frame(stats_frame, bg='white', relief='solid', bd=1)
+            stat_card.grid(row=idx//2, column=idx%2, padx=10, pady=5, sticky='ew')
+            tk.Label(stat_card, text=label, font=('Arial', 10), bg='white').pack(pady=2)
+            tk.Label(stat_card, text=value, font=('Arial', 16, 'bold'), fg=color, bg='white').pack(pady=2)
+
+        # Styled Total Availability
+        availability_frame = tk.LabelFrame(self.content_frame, text="Total Availability", bg='white', font=('Arial', 12, 'bold'))
+        availability_frame.pack(fill=tk.X, pady=10, padx=5)
+        card = tk.Frame(availability_frame, bg='white', relief='solid', bd=1)
+        card.pack(fill=tk.X, padx=10, pady=10)
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT pass_type FROM pricing')
+        pass_types = [row[0] for row in cursor.fetchall()]
+        for pass_type in pass_types:
+            cursor.execute('SELECT SUM(quantity) FROM customers WHERE pass_type=?', (pass_type,))
+            sold = cursor.fetchone()[0] or 0
+            available = 1000 - sold
+            row = tk.Frame(card, bg='white')
+            row.pack(fill=tk.X, pady=2)
+            tk.Label(row, text=f"{pass_type}: ", font=('Arial', 12, 'bold'), bg='white', width=20, anchor='w').pack(side=tk.LEFT)
+            tk.Label(row, text=f"{available}", font=('Arial', 12), bg='white', fg='#2196F3', anchor='w').pack(side=tk.LEFT)
+        conn.close()
+
+        # Recent Sales Table section
+        recent_frame = tk.LabelFrame(self.content_frame, text="Recent Sales", bg='white', font=('Arial', 12, 'bold'))
+        recent_frame.pack(fill=tk.X, pady=10, padx=5)
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        cursor.execute('''SELECT ticket_id, name, pass_type, quantity, amount, purchased_date FROM customers WHERE employee_id=? ORDER BY purchased_date DESC, rowid DESC LIMIT 5''', (self.employee_id,))
+        recents = cursor.fetchall()
+        conn.close()
+        # Table headers
+        header_row = tk.Frame(recent_frame, bg='white')
+        header_row.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(header_row, text="Customer Name", font=('Arial', 11, 'bold'), bg='white', width=18, anchor='w').pack(side=tk.LEFT, padx=5)
+        tk.Label(header_row, text="Pass Type", font=('Arial', 11, 'bold'), bg='white', width=12, anchor='w').pack(side=tk.LEFT, padx=5)
+        tk.Label(header_row, text="Qty", font=('Arial', 11, 'bold'), bg='white', width=5, anchor='w').pack(side=tk.LEFT, padx=5)
+        tk.Label(header_row, text="Amount", font=('Arial', 11, 'bold'), bg='white', width=10, anchor='w').pack(side=tk.LEFT, padx=5)
+        tk.Label(header_row, text="Date", font=('Arial', 11, 'bold'), bg='white', width=12, anchor='w').pack(side=tk.LEFT, padx=5)
+        if recents:
+            for ticket_id, name, pass_type, quantity, amount, purchased_date in recents:
+                row = tk.Frame(recent_frame, bg='white')
+                row.pack(fill=tk.X, pady=1)
+                tk.Label(row, text=name, font=('Arial', 11), bg='white', width=18, anchor='w').pack(side=tk.LEFT, padx=5)
+                tk.Label(row, text=pass_type, font=('Arial', 11), bg='white', width=12, anchor='w').pack(side=tk.LEFT, padx=5)
+                tk.Label(row, text=quantity, font=('Arial', 11), bg='white', width=5, anchor='w').pack(side=tk.LEFT, padx=5)
+                tk.Label(row, text=f"₱{amount:,.2f}", font=('Arial', 11), bg='white', width=10, anchor='w').pack(side=tk.LEFT, padx=5)
+                tk.Label(row, text=purchased_date, font=('Arial', 11), bg='white', width=12, anchor='w').pack(side=tk.LEFT, padx=5)
+        else:
+            tk.Label(recent_frame, text="No sales yet.", font=('Arial', 11, 'italic'), fg='#6b7280', bg='white', anchor='w').pack(anchor='w', padx=10, pady=2)
+
+    def update_time(self):
+        try:
+            current = datetime.now()
+            current_time = current.strftime("%Y-%m-%d %H:%M:%S")
+            if hasattr(self, 'time_label'):
+                self.time_label.config(text=current_time)
+            if hasattr(self, 'date_label'):
+                self.date_label.config(text=current.strftime("%A, %B %d, %Y"))
+            self.root.after(1000, self.update_time)
+        except Exception as e:
+            print(f"Error updating time: {e}")
+
+    def show_rides(self):
+        self.clear_content()
+        # to create main frame for rides
+        rides_frame = tk.Frame(self.content_frame, bg='white')
+        rides_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # to create title frame
+        header_frame = tk.Frame(rides_frame, bg='white')
+        header_frame.pack(fill=tk.X, pady=(0, 0))
+
+        # to create title
+        title = tk.Label(header_frame, text="Pass Types and Inclusions", font=('Arial', 16, 'bold'), bg='white', anchor='w')
+        title.pack(anchor='w', padx=0, pady=(0, 0))
+        # Subtitle styled like Customers
+        subtitle = tk.Label(header_frame, text="View Rides Descriptions and Inclusions", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
+        subtitle.pack(anchor='w', padx=0, pady=(0, 10))
+
+        # to create a canvas with scrollbar
+        canvas = tk.Canvas(rides_frame, bg='white')
+        scrollbar = ttk.Scrollbar(rides_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg='white')
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # to define pass types and their descriptions
+        pass_descriptions = [
+            ("Express Pass", """• Priority access to all rides and attractions\n• Skip regular lines\n• Access to exclusive Express Pass lanes\n• Unlimited rides all day\n• Special discounts at food stalls\n• Free locker usage\n• Free parking\n• Exclusive souvenir"""),
+            ("Junior Pass", """• Access to all kid-friendly rides\n• Special access to children's play areas\n• Meet and greet with mascots\n• Free snack pack\n• Age requirement: 4-12 years old\n• Free kid's meal\n• Free face painting\n• Access to kids' workshops"""),
+            ("Regular Pass", """• Standard access to all rides and attractions\n• Regular queue lines\n• Full day access\n• Basic amenities access\n• Suitable for all ages\n• Free water bottle\n• Access to rest areas\n• Standard locker rental rates"""),
+            ("Student Pass", """• Access to all rides and attractions\n• Special student discount\n• Valid student ID required\n• Available on weekdays only\n• Includes free locker use\n• Free study area access\n• Student meal discount\n• Free WiFi access"""),
+            ("Senior Citizen Pass", """• Access to all rides and attractions\n• Priority queuing at selected rides\n• Special assistance available\n• Senior citizen ID required\n• Includes free refreshments\n• Access to senior's lounge\n• Free health monitoring\n• Special meal options"""),
+            ("PWD Pass", """• Access to all rides and attractions\n• Priority queuing at all rides\n• Special assistance available\n• PWD ID required\n• Companion gets 50% discount\n• Free wheelchair service\n• Dedicated assistance staff\n• Special facilities access""")
+        ]
+
+        for pass_type, description in pass_descriptions:
+            # to create frame for each pass type
+            pass_frame = tk.Frame(scrollable_frame, bg='white', bd=1, relief='solid')
+            pass_frame.pack(fill=tk.X, pady=5, padx=10)
+
+            # to create header frame with pass type
+            header = tk.Frame(pass_frame, bg='#f0f0f0')
+            header.pack(fill=tk.X)
+
+            # to create pass type header
+            tk.Label(header, text=pass_type, font=('Arial', 12, 'bold'), 
+                    bg='#f0f0f0', padx=10, pady=5).pack(anchor='w')
+
+            # description with bullet points
+            desc_label = tk.Label(pass_frame, text=description, font=('Arial', 11),
+                               bg='white', justify=tk.LEFT, anchor='w', wraplength=600)
+            desc_label.pack(fill=tk.X, padx=20, pady=10)
+
+        # to pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+    def show_customers(self):
+        self.clear_content()
+        customer_title = tk.Label(self.content_frame, text="Customers", font=('Arial', 16, 'bold'), bg='white', anchor='w')
+        customer_title.pack(pady=(10, 0), padx=20, anchor='w')
+        customer_subtitle = tk.Label(self.content_frame, text="View, Add, Edit, and Delete Customers", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
+        customer_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
+
+        controls_frame = tk.Frame(self.content_frame, bg='white')
+        controls_frame.pack(fill=tk.X, pady=10)
+
+        search_frame = tk.Frame(controls_frame, bg='white')
+        search_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Label(search_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
+        search_entry = tk.Entry(search_frame, textvariable=self.search_var, font=('Arial', 11), width=40)
+        search_entry.pack(side=tk.LEFT, padx=5)
+
+        # Buttons for add, edit, delete
+        btn_frame = tk.Frame(controls_frame, bg='white')
+        btn_frame.pack(side=tk.RIGHT, padx=10)
+        tk.Button(btn_frame, text="Add Customer", command=self.add_customer_dialog, bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Edit Customer", command=self.edit_customer_dialog, bg='#2196F3', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Delete Customer", command=self.delete_customer, bg='#f44336', fg='white').pack(side=tk.LEFT, padx=5)
+
+        sort_frame = tk.Frame(controls_frame, bg='white')
+        sort_frame.pack(side=tk.RIGHT)
+        tk.Label(sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
+        sort_options = ttk.Combobox(sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"])
+        sort_options.pack(side=tk.LEFT, padx=5)
+        sort_options.set("Name (A-Z)")
+
+        columns = ('Ticket ID', 'Name', 'Email', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Pass Type')
+        self.customers_tree = ttk.Treeview(self.content_frame, columns=columns, show='headings')
+        for col in columns:
+            self.customers_tree.heading(col, text=col)
+            self.customers_tree.column(col, width=120)
+        self.customers_tree.pack(fill=tk.BOTH, expand=True, pady=10)
+        scrollbar = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, command=self.customers_tree.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.customers_tree.configure(yscrollcommand=scrollbar.set)
+        sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_customers(sort_options.get()))
+        self.load_customers_data()
+
+    def search_customers(self, *args):
+        search_text = self.search_var.get().lower()
+        for item in self.customers_tree.get_children():
+            self.customers_tree.delete(item)
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type FROM customers WHERE employee_id=?', (self.employee_id,))
+        customers = cursor.fetchall()
+        conn.close()
+        for customer in customers:
+            if any(search_text in str(value).lower() for value in customer):
+                self.customers_tree.insert('', tk.END, values=customer)
+
+    def sort_customers(self, sort_option):
+        items = []
+        for item in self.customers_tree.get_children():
+            values = self.customers_tree.item(item)['values']
+            items.append(values)
+        if sort_option == "Name (A-Z)":
+            items.sort(key=lambda x: x[1])
+        elif sort_option == "Name (Z-A)":
+            items.sort(key=lambda x: x[1], reverse=True)
+        elif sort_option == "Date (Newest)":
+            items.sort(key=lambda x: x[6], reverse=True)
+        elif sort_option == "Date (Oldest)":
+            items.sort(key=lambda x: x[6])
+        for item in self.customers_tree.get_children():
+            self.customers_tree.delete(item)
+        for item in items:
+            self.customers_tree.insert('', tk.END, values=item)
+
+    def load_customers_data(self):
+        for item in self.customers_tree.get_children():
+            self.customers_tree.delete(item)
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type FROM customers WHERE employee_id=?', (self.employee_id,))
+        customers = cursor.fetchall()
+        conn.close()
+        for customer in customers:
+            self.customers_tree.insert('', tk.END, values=customer)
+
+    def get_availability_for_pass(self, pass_type):
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT SUM(quantity) FROM customers WHERE pass_type=?', (pass_type,))
+        sold = cursor.fetchone()[0] or 0
+        available = 1000 - sold
+        conn.close()
+        return available
+
+    def add_customer_dialog(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add Customer")
+        dialog.geometry("500x600")
+        dialog.configure(bg='white')
+        main_frame = tk.Frame(dialog, bg='white', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        ticket_id = self.generate_ticket_id()
+        tk.Label(main_frame, text=f"Ticket ID: {ticket_id}", font=('Arial', 11, 'bold'), bg='white').pack(anchor='w', pady=(0, 10))
+        
+        # Name
+        tk.Label(main_frame, text="Name:", font=('Arial', 11), bg='white').pack(anchor='w')
+        name_entry = tk.Entry(main_frame, font=('Arial', 11))
+        name_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        # Email
+        tk.Label(main_frame, text="Email:", font=('Arial', 11), bg='white').pack(anchor='w')
+        email_entry = tk.Entry(main_frame, font=('Arial', 11))
+        email_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        # Quantity
+        tk.Label(main_frame, text="Quantity:", font=('Arial', 11), bg='white').pack(anchor='w')
+        quantity_entry = tk.Entry(main_frame, font=('Arial', 11), name='quantity_entry'
+        )
+        quantity_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        # Pass Type
+        tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
+        pass_type_combo = ttk.Combobox(main_frame, values=self.get_pass_types(), font=('Arial', 11), name='pass_type_combo')
+        pass_type_combo.pack(fill=tk.X, pady=(0, 10))
+        
+        # Amount
+        tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
+        amount_var = tk.StringVar()
+        amount_entry = tk.Entry(main_frame, font=('Arial', 11), textvariable=amount_var, state='readonly', name='amount_entry')
+        amount_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
+        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        booked_date_entry.pack(fill=tk.X, pady=(0, 10))
+        purchased_date = datetime.now().strftime('%Y-%m-%d')
+        tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
+        purchased_date_label = tk.Label(main_frame, text=purchased_date, font=('Arial', 11), bg='white')
+        purchased_date_label.pack(fill=tk.X, pady=(0, 10))
+        # Show available tickets for selected pass type
+        available_var = tk.StringVar(value="")
+        available_label = tk.Label(main_frame, textvariable=available_var, font=('Arial', 10), fg='#6b7280', bg='white')
+        available_label.pack(anchor='w', pady=(0, 10))
+        def update_amount_and_availability(*args):
+            try:
+                pass_type = pass_type_combo.get()
+                quantity = int(quantity_entry.get())
+                # Always get fresh price from database
+                price = self.get_price_for_pass(pass_type)
+                available = self.get_availability_for_pass(pass_type)
+                amount = price * quantity
+                amount_var.set(f"{amount:.2f}")
+                available_var.set(f"Available: {available}")
+                if quantity > available:
+                    quantity_entry.config(fg='red')
+                else:
+                    quantity_entry.config(fg='black')
+            except Exception:
+                amount_var.set("")
+                available_var.set("")
+                quantity_entry.config(fg='black')
+        
+        pass_type_combo.bind('<<ComboboxSelected>>', update_amount_and_availability)
+        quantity_entry.bind('<KeyRelease>', update_amount_and_availability)
+        def save_customer():
+            name = name_entry.get().strip()
+            email = email_entry.get().strip()
+            quantity = quantity_entry.get().strip()
+            pass_type = pass_type_combo.get().strip()
+            amount = amount_var.get().strip()
+            booked_date = booked_date_entry.get()
+            if not (name and email and quantity and pass_type and amount and booked_date and purchased_date):
+                messagebox.showerror("Error", "All fields are required!")
+                return
+            available = self.get_availability_for_pass(pass_type)
+            if int(quantity) > available:
+                messagebox.showerror("Error", f"Cannot book more than {available} tickets for {pass_type}.")
+                return
+            try:
+                conn = sqlite3.connect('funpass.db')
+                cursor = conn.cursor()
+                cursor.execute('''INSERT INTO customers (ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type, employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (ticket_id, name, email, int(quantity), float(amount), booked_date, purchased_date, pass_type, self.employee_id))
+                conn.commit()
+                conn.close()
+                dialog.destroy()
+                self.load_customers_data()
+                self.print_ticket(ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type)
+                messagebox.showinfo("Success", "Customer added and ticket printed!")
+            except Exception as e:
+                messagebox.showerror("Error", f"An error occurred: {str(e)}")
+        tk.Button(main_frame, text="Save", command=save_customer, bg='#4CAF50', fg='white').pack(pady=10)
+        tk.Button(main_frame, text="Cancel", command=dialog.destroy, bg='#f44336', fg='white').pack()
+
+    def edit_customer_dialog(self):
+        selected = self.customers_tree.selection()
+        if not selected:
+            messagebox.showwarning("No Selection", "Please select a customer to edit.")
+            return
+        values = self.customers_tree.item(selected[0])['values']
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit Customer")
+        dialog.geometry("500x600")
+        dialog.configure(bg='white')
+        main_frame = tk.Frame(dialog, bg='white', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Name
+        tk.Label(main_frame, text="Name:", font=('Arial', 11), bg='white').pack(anchor='w')
+        name_entry = tk.Entry(main_frame, font=('Arial', 11))
+        name_entry.insert(0, values[1])
+        name_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        # Email
+        tk.Label(main_frame, text="Email:", font=('Arial', 11), bg='white').pack(anchor='w')
+        email_entry = tk.Entry(main_frame, font=('Arial', 11))
+        email_entry.insert(0, values[2])
+        email_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        # Quantity
+        tk.Label(main_frame, text="Quantity:", font=('Arial', 11), bg='white').pack(anchor='w')
+        quantity_entry = tk.Entry(main_frame, font=('Arial', 11), name='quantity_entry')
+        quantity_entry.insert(0, values[3])
+        quantity_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        # Pass Type
+        tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
+        pass_type_combo = ttk.Combobox(main_frame, values=self.get_pass_types(), font=('Arial', 11), name='pass_type_combo')
+        pass_type_combo.set(values[7])
+        pass_type_combo.pack(fill=tk.X, pady=(0, 10))
+        
+        # Amount
+        tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
+        amount_var = tk.StringVar(value=values[4])
+        amount_entry = tk.Entry(main_frame, font=('Arial', 11), textvariable=amount_var, state='readonly', name='amount_entry')
+        amount_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
+        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        booked_date_entry.set_date(values[5])
+        booked_date_entry.pack(fill=tk.X, pady=(0, 10))
+        # Purchased Date
+        tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
+        purchased_date_label = tk.Label(main_frame, text=values[6], font=('Arial', 11), bg='white')
+        purchased_date_label.pack(fill=tk.X, pady=(0, 10))
+        def update_amount(*args):
+            try:
+                pass_type = pass_type_combo.get()
+                quantity = int(quantity_entry.get())
+                # Always get fresh price from database
+                price = self.get_price_for_pass(pass_type)
+                amount = price * quantity
+                amount_var.set(f"{amount:.2f}")
+            except Exception:
+                amount_var.set("")
+        
+        pass_type_combo.bind('<<ComboboxSelected>>', update_amount)
+        quantity_entry.bind('<KeyRelease>', update_amount)
+        def save_edit():
+            name = name_entry.get().strip()
+            email = email_entry.get().strip()
+            quantity = quantity_entry.get().strip()
+            pass_type = pass_type_combo.get().strip()
+            amount = amount_var.get().strip()
+            booked_date = booked_date_entry.get()
+            purchased_date = purchased_date_label.cget('text')
+            if not (name and email and quantity and pass_type and amount and booked_date and purchased_date):
+                messagebox.showerror("Error", "All fields are required!")
+                return
+            try:
+                conn = sqlite3.connect('funpass.db')
+                cursor = conn.cursor()
+                cursor.execute('''UPDATE customers SET name=?, email=?, quantity=?, amount=?, booked_date=?, purchased_date=? WHERE ticket_id=? AND employee_id=?''',
+                    (name, email, int(quantity), float(amount), booked_date, purchased_date, values[0], self.employee_id))
+                conn.commit()
+                conn.close()
+                dialog.destroy()
+                self.load_customers_data()
+                messagebox.showinfo("Success", "Customer updated!")
+            except Exception as e:
+                messagebox.showerror("Error", f"An error occurred: {str(e)}")
+        tk.Button(main_frame, text="Save", command=save_edit, bg='#4CAF50', fg='white').pack(pady=10)
+        tk.Button(main_frame, text="Cancel", command=dialog.destroy, bg='#f44336', fg='white').pack()
+
+    def delete_customer(self):
+        selected = self.customers_tree.selection()
+        if not selected:
+            messagebox.showwarning("No Selection", "Please select a customer to delete.")
+            return
+        values = self.customers_tree.item(selected[0])['values']
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this customer?"):
+            try:
+                conn = sqlite3.connect('funpass.db')
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM customers WHERE ticket_id=? AND employee_id=?', (values[0], self.employee_id))
+                conn.commit()
+                conn.close()
+                self.load_customers_data()
+                messagebox.showinfo("Success", "Customer deleted!")
+            except Exception as e:
+                messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+    def generate_ticket_id(self):
+        import random, string
+        return 'F' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+
+    def get_pass_types(self):
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT pass_type FROM pricing')
+        pass_types = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        return pass_types
+
+    def get_price_for_pass(self, pass_type):
+        """Get fresh price from database with caching for performance"""
+        # Check cache first
+        if pass_type in self._price_cache:
+            return self._price_cache[pass_type]
+
+        # Get fresh price from database
+        conn = sqlite3.connect('funpass.db')
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT price FROM pricing WHERE pass_type=?', (pass_type,))
+            row = cursor.fetchone()
+            if row:
+                price = float(row[0])
+                # Cache the price
+                self._price_cache[pass_type] = price
+                return price
+            return 0.0
+        finally:
+            conn.close()
+
+    def print_ticket(self, ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type):
+        print_win = tk.Toplevel(self.root)
+        print_win.title("Booking Receipt")
+        print_win.geometry("420x650")
+        print_win.configure(bg='white')
+        # Add logo at the top
+        try:
+            logo_path = "C:/Users/MicaellaEliab/Downloads/FunPassProjectA/FunPass__1_-removebg-preview.png"
+            logo_img = Image.open(logo_path)
+            logo_width = 100
+            aspect_ratio = logo_img.height / logo_img.width
+            logo_height = int(logo_width * aspect_ratio)
+            logo_img = logo_img.resize((logo_width, logo_height))
+            logo = ImageTk.PhotoImage(logo_img)
+            logo_label = tk.Label(print_win, image=logo, bg='white')
+            logo_label.image = logo
+            logo_label.pack(pady=(20, 5))
+        except Exception as e:
+            tk.Label(print_win, text="FunPass", font=('Arial', 18, 'bold'), bg='white', fg='#4CAF50').pack(pady=(20, 5))
+        # Short description
+        tk.Label(print_win, text="FunPass: Amusement Park Ticketing System", font=('Arial', 10, 'italic'), fg='#6b7280', bg='white').pack(pady=(0, 10))
+        # Main title
+        tk.Label(print_win, text="FunPass Booking Receipt", font=('Arial', 18, 'bold'), bg='white').pack(pady=(0, 10))
+        # Booking Details Frame
+        details_frame = tk.LabelFrame(print_win, text="Booking Details", font=('Arial', 12, 'bold'), bg='white', fg='black', padx=15, pady=15, relief='solid', bd=1)
+        details_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+        # Details fields
+        fields = [
+            ("Customer Name:", name),
+            ("Email:", email),
+            ("Ticket Type:", pass_type),
+            ("Quantity:", quantity),
+            ("Unit Price:", f"₱{float(amount)/int(quantity):,.2f}" if quantity else f"₱{amount}"),
+            ("Total Amount:", f"₱{amount}"),
+            ("Booked Date:", booked_date),
+            ("Purchased Date:", purchased_date)
+        ]
+        for label, value in fields:
+            row = tk.Frame(details_frame, bg='white')
+            row.pack(fill=tk.X, pady=2)
+            tk.Label(row, text=label, font=('Arial', 11, 'bold'), bg='white', anchor='w', width=16).pack(side=tk.LEFT)
+            tk.Label(row, text=str(value), font=('Arial', 11), bg='white', anchor='w').pack(side=tk.LEFT, padx=10)
+        # Terms & Conditions
+        terms_frame = tk.LabelFrame(print_win, text="Terms & Conditions", font=('Arial', 12, 'bold'), bg='white', fg='black', padx=15, pady=10, relief='solid', bd=1)
+        terms_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+        terms = [
+            "Tickets are valid only for the booked date",
+            "No refunds for unused tickets",
+            "Please present this receipt at the entrance",
+            "Subject to park rules and regulations"
+        ]
+        for term in terms:
+            tk.Label(terms_frame, text=f"• {term}", font=('Arial', 10), bg='white', anchor='w', justify='left').pack(anchor='w', pady=1)
+        tk.Button(print_win, text="Close", command=print_win.destroy, bg='white', font=('Arial', 11), relief='groove').pack(pady=10)
+
+    def show_cancellations(self):
+        self.clear_content()
+        cancel_title = tk.Label(self.content_frame, text="Cancellations & Refunds", font=('Arial', 16, 'bold'), bg='white', anchor='w')
+        cancel_title.pack(pady=(10, 0), padx=20, anchor='w')
+        cancel_subtitle = tk.Label(self.content_frame, text="Add, Edit, and Delete Cancellation Requests (Status is always Pending)", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
+        cancel_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
+
+        # Controls frame
+        controls_frame = tk.Frame(self.content_frame, bg='white')
+        controls_frame.pack(fill=tk.X, pady=10, padx=20)
+
+        # Search and Sort
+        left_frame = tk.Frame(controls_frame, bg='white')
+        left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Search
+        search_frame = tk.Frame(left_frame, bg='white')
+        search_frame.pack(side=tk.LEFT, fill=tk.X)
+        tk.Label(search_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
+        self.cancel_search_var = tk.StringVar()
+        self.cancel_search_var.trace('w', self.search_cancellations)
+        search_entry = tk.Entry(search_frame, textvariable=self.cancel_search_var, font=('Arial', 11), width=30)
+        search_entry.pack(side=tk.LEFT, padx=5)
+
+        # Sort
+        sort_frame = tk.Frame(left_frame, bg='white')
+        sort_frame.pack(side=tk.LEFT)
+        tk.Label(sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
+        sort_options = ttk.Combobox(sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"], 
+                                  font=('Arial', 11), width=15)
+        sort_options.pack(side=tk.LEFT, padx=5)
+        sort_options.set("Name (A-Z)")
+        sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_cancellations(sort_options.get()))
+
+        # Buttons
+        btn_frame = tk.Frame(controls_frame, bg='white')
+        btn_frame.pack(side=tk.RIGHT, padx=10)
+        tk.Button(btn_frame, text="Add Request", command=self.add_cancellation_dialog, bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Edit Request", command=self.edit_cancellation_dialog, bg='#2196F3', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Delete Request", command=self.delete_cancellation, bg='#f44336', fg='white').pack(side=tk.LEFT, padx=5)
+
+        # Tree view frame
+        tree_frame = tk.Frame(self.content_frame, bg='white')
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Scrollbars
+        y_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL)
+        x_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL)
+        
+        # Treeview
+        columns = ('Ticket ID', 'Name', 'Email', 'Reasons', 'Quantity', 'Amount', 'Pass Type', 'Booked Date', 'Purchased Date', 'Status')
+        self.cancellations_tree = ttk.Treeview(tree_frame, columns=columns, show='headings',
+                                              yscrollcommand=y_scrollbar.set,
+                                              xscrollcommand=x_scrollbar.set)
+
+        # Configure scrollbars
+        y_scrollbar.config(command=self.cancellations_tree.yview)
+        x_scrollbar.config(command=self.cancellations_tree.xview)
+
+        # Configure column headings
+        for col in columns:
+            self.cancellations_tree.heading(col, text=col, anchor='w')
+            # Set a reasonable minimum width for each column
+            self.cancellations_tree.column(col, minwidth=100, width=120, stretch=True)
+
+        # Pack everything
+        y_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        x_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.cancellations_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Load the data
+        self.load_cancellations_data()
+
+    def load_cancellations_data(self):
+        # Clear existing items
+        for item in self.cancellations_tree.get_children():
+            self.cancellations_tree.delete(item)
+            
+        try:
+            conn = sqlite3.connect('funpass.db')
+            cursor = conn.cursor()
+            # Join with customers table to get the pass_type
+            cursor.execute('''
+                SELECT c.ticket_id, c.name, c.email, c.reasons, c.quantity, 
+                       c.amount, cu.pass_type, c.booked_date, c.purchased_date, c.status
+                FROM cancellations c
+                LEFT JOIN customers cu ON c.ticket_id = cu.ticket_id
+            ''')
+            cancellations = cursor.fetchall()
+            conn.close()
+
+            # Insert data into treeview
+            for cancellation in cancellations:
+                self.cancellations_tree.insert('', tk.END, values=cancellation)
+
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Error loading cancellation data: {str(e)}")
+
+    def search_cancellations(self, *args):
+        search_text = self.cancel_search_var.get().lower()
+        
+        # Clear existing items
+        for item in self.cancellations_tree.get_children():
+            self.cancellations_tree.delete(item)
+            
+        try:
+            conn = sqlite3.connect('funpass.db')
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT c.ticket_id, c.name, c.email, c.reasons, c.quantity, 
+                       c.amount, cu.pass_type, c.booked_date, c.purchased_date, c.status
+                FROM cancellations c
+                LEFT JOIN customers cu ON c.ticket_id = cu.ticket_id
+            ''')
+            cancellations = cursor.fetchall()
+            conn.close()
+
+            # Filter and insert matching data
+            for cancellation in cancellations:
+                if any(search_text in str(value).lower() for value in cancellation):
+                    self.cancellations_tree.insert('', tk.END, values=cancellation)
+
+        except Exception as e:
+            messagebox.showerror("Search Error", f"Error searching cancellations: {str(e)}")
+
+    def sort_cancellations(self, sort_option):
+        """Sort the cancellations based on the selected option."""
+        items = []
+        for item in self.cancellations_tree.get_children():
+            values = self.cancellations_tree.item(item)['values']
+            items.append(values)
+            
+        # Sort based on selected option
+        if sort_option == "Name (A-Z)":
+            items.sort(key=lambda x: x[1].lower() if x[1] else '')  # Sort by name
+        elif sort_option == "Name (Z-A)":
+            items.sort(key=lambda x: x[1].lower() if x[1] else '', reverse=True)
+        elif sort_option == "Date (Newest)":
+            items.sort(key=lambda x: x[8] if x[8] else '', reverse=True)  # Sort by booked date
+        elif sort_option == "Date (Oldest)":
+            items.sort(key=lambda x: x[8] if x[8] else '')
+            
+        # Clear and repopulate the tree
+        for item in self.cancellations_tree.get_children():
+            self.cancellations_tree.delete(item)
+        for item in items:
+            self.cancellations_tree.insert('', tk.END, values=item)
+
+    def add_cancellation_dialog(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add Cancellation Request")
+        dialog.geometry("500x650")
+        dialog.configure(bg='white')
+        main_frame = tk.Frame(dialog, bg='white', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Ticket ID
+        tk.Label(main_frame, text="Ticket ID:", font=('Arial', 11), bg='white').pack(anchor='w')
+        ticket_id_entry = tk.Entry(main_frame, font=('Arial', 11))
+        ticket_id_entry.pack(fill=tk.X, pady=(0, 10))
+        # Name
+        tk.Label(main_frame, text="Name:", font=('Arial', 11), bg='white').pack(anchor='w')
+        name_entry = tk.Entry(main_frame, font=('Arial', 11))
+        name_entry.pack(fill=tk.X, pady=(0, 10))
+        # Email
+        tk.Label(main_frame, text="Email:", font=('Arial', 11), bg='white').pack(anchor='w')
+        email_entry = tk.Entry(main_frame, font=('Arial', 11))
+        email_entry.pack(fill=tk.X, pady=(0, 10))
+        # Reasons
+        tk.Label(main_frame, text="Reasons:", font=('Arial', 11), bg='white').pack(anchor='w')
+        reasons_entry = tk.Entry(main_frame, font=('Arial', 11))
+        reasons_entry.pack(fill=tk.X, pady=(0, 10))
+        # Quantity
+        tk.Label(main_frame, text="Quantity:", font=('Arial', 11), bg='white').pack(anchor='w')
+        quantity_entry = tk.Entry(main_frame, font=('Arial', 11))
+        quantity_entry.pack(fill=tk.X, pady=(0, 10))
+        # Amount
+        tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
+        amount_entry = tk.Entry(main_frame, font=('Arial', 11))
+        amount_entry.pack(fill=tk.X, pady=(0, 10))
+        # Booked Date
+        tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
+        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        booked_date_entry.pack(fill=tk.X, pady=(0, 10))
+        # Purchased Date
+        tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
+        purchased_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        purchased_date_entry.pack(fill=tk.X, pady=(0, 10))
+        # Pass Type
+        tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
+        pass_type_combo = ttk.Combobox(main_frame, values=self.get_pass_types(), font=('Arial', 11))
+        pass_type_combo.pack(fill=tk.X, pady=(0, 10))
+        def save_cancellation():
+            ticket_id = ticket_id_entry.get().strip()
+            name = name_entry.get().strip()
+            email = email_entry.get().strip()
+            reasons = reasons_entry.get().strip()
+            quantity = quantity_entry.get().strip()
+            amount = amount_entry.get().strip()
+            booked_date = booked_date_entry.get()
+            purchased_date = purchased_date_entry.get()
+            pass_type = pass_type_combo.get().strip()
+            if not (ticket_id and name and email and reasons and quantity and amount and booked_date and purchased_date and pass_type):
+                messagebox.showerror("Error", "All fields are required!")
+                return
+            try:
+                conn = sqlite3.connect('funpass.db')
+                cursor = conn.cursor()
+                cursor.execute('''INSERT INTO cancellations (ticket_id, name, email, reasons, quantity, amount, booked_date, purchased_date, pass_type, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (ticket_id, name, email, reasons, int(quantity), float(amount), booked_date, purchased_date, pass_type, 'Pending'))
+                conn.commit()
+                conn.close()
+                dialog.destroy()
+                self.load_cancellations_data()
+                messagebox.showinfo("Success", "Cancellation request added!")
+            except Exception as e:
+                messagebox.showerror("Error", f"An error occurred: {str(e)}")
+        tk.Button(main_frame, text="Save", command=save_cancellation, bg='#4CAF50', fg='white').pack(pady=10)
+        tk.Button(main_frame, text="Cancel", command=dialog.destroy, bg='#f44336', fg='white').pack()
+
+    def edit_cancellation_dialog(self):
+        selected = self.cancellations_tree.selection()
+        if not selected:
+            messagebox.showwarning("No Selection", "Please select a request to edit.")
+            return
+        values = self.cancellations_tree.item(selected[0])['values']
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit Cancellation Request")
+        dialog.geometry("500x650")
+        dialog.configure(bg='white')
+        
+        main_frame = tk.Frame(dialog, bg='white', padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Ticket ID (read-only)
+        tk.Label(main_frame, text="Ticket ID:", font=('Arial', 11), bg='white').pack(anchor='w')
+        ticket_id_var = tk.StringVar(value=values[0])
+        ticket_id_entry = tk.Entry(main_frame, textvariable=ticket_id_var, font=('Arial', 11), state='readonly')
+        ticket_id_entry.pack(fill=tk.X, pady=(0, 10))
+
+        # Name
+        tk.Label(main_frame, text="Name:", font=('Arial', 11), bg='white').pack(anchor='w')
+        name_var = tk.StringVar(value=values[1])
+        name_entry = tk.Entry(main_frame, textvariable=name_var, font=('Arial', 11))
+        name_entry.pack(fill=tk.X, pady=(0, 10))
+
+        # Email
+        tk.Label(main_frame, text="Email:", font=('Arial', 11), bg='white').pack(anchor='w')
+        email_var = tk.StringVar(value=values[2])
+        email_entry = tk.Entry(main_frame, textvariable=email_var, font=('Arial', 11))
+        email_entry.pack(fill=tk.X, pady=(0, 10))
+
+        # Reasons
+        tk.Label(main_frame, text="Reasons:", font=('Arial', 11), bg='white').pack(anchor='w')
+        reasons_text = tk.Text(main_frame, font=('Arial', 11), height=4)
+        reasons_text.insert('1.0', values[3])
+        reasons_text.pack(fill=tk.X, pady=(0, 10))
+
+        # Quantity
+        tk.Label(main_frame, text="Quantity:", font=('Arial', 11), bg='white').pack(anchor='w')
+        quantity_var = tk.StringVar(value=values[4])
+        quantity_entry = tk.Entry(main_frame, textvariable=quantity_var, font=('Arial', 11))
+        quantity_entry.pack(fill=tk.X, pady=(0, 10))
+
+        # Amount
+        tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
+        amount_var = tk.StringVar(value=values[5])
+        amount_entry = tk.Entry(main_frame, textvariable=amount_var, font=('Arial', 11))
+        amount_entry.pack(fill=tk.X, pady=(0, 10))
+
+        # Pass Type
+        tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
+        pass_type_var = tk.StringVar(value=values[6])
+        pass_type_combo = ttk.Combobox(main_frame, textvariable=pass_type_var, values=self.get_pass_types(), font=('Arial', 11))
+        pass_type_combo.pack(fill=tk.X, pady=(0, 10))
+
+        # Booked Date
+        tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
+        booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        booked_date_entry.set_date(values[7])
+        booked_date_entry.pack(fill=tk.X, pady=(0, 10))
+
+        # Purchased Date
+        tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
+        purchased_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='yyyy-MM-dd')
+        purchased_date_entry.set_date(values[8])
+        purchased_date_entry.pack(fill=tk.X, pady=(0, 10))
+
+        def save_edit():
+            if not (name_var.get().strip() and email_var.get().strip() and 
+                   reasons_text.get("1.0", tk.END).strip() and quantity_var.get().strip() and 
+                   amount_var.get().strip() and pass_type_var.get().strip()):
+                messagebox.showerror("Error", "All fields are required!")
+                return
+            try:
+                conn = sqlite3.connect('funpass.db')
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE cancellations 
+                    SET name=?, email=?, reasons=?, quantity=?, amount=?, 
+                        booked_date=?, purchased_date=?, pass_type=?
+                    WHERE ticket_id=?
+                ''', (
+                    name_var.get().strip(),
+                    email_var.get().strip(),
+                    reasons_text.get("1.0", tk.END).strip(),
+                    int(quantity_var.get().strip()),
+                    float(amount_var.get().strip()),
+                    booked_date_entry.get(),
+                    purchased_date_entry.get(),
+                    pass_type_var.get().strip(),
+                    ticket_id_var.get()
+                ))
+                conn.commit()
+                conn.close()
+                dialog.destroy()
+                self.load_cancellations_data()
+                messagebox.showinfo("Success", "Cancellation request updated successfully!")
+            except Exception as e:
+                messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+        # Save and Cancel buttons
+        button_frame = tk.Frame(main_frame, bg='white')
+        button_frame.pack(fill=tk.X, pady=(20, 0))
+        tk.Button(button_frame, text="Save", command=save_edit, bg='#4CAF50', fg='white', width=15).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Cancel", command=dialog.destroy, bg='#f44336', fg='white', width=15).pack(side=tk.RIGHT, padx=5)
+
+    def delete_cancellation(self):
+        selected = self.cancellations_tree.selection()
+        if not selected:
+            messagebox.showwarning("No Selection", "Please select a request to delete.")
+            return
+        values = self.cancellations_tree.item(selected[0])['values']
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this request?"):
+            try:
+                conn = sqlite3.connect('funpass.db')
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM cancellations WHERE ticket_id=?', (values[1],))
+                conn.commit()
+                conn.close()
+                self.load_cancellations_data()
+                messagebox.showinfo("Success", "Request deleted!")
+            except Exception as e:
+                messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+    def show_pricing(self):
+        self.clear_content()
+        pricing_title = tk.Label(self.content_frame, text="Pass Type Pricing", font=('Arial', 16, 'bold'), bg='white', anchor='w')
+        pricing_title.pack(pady=(10, 0), padx=20, anchor='w')
+        pricing_subtitle = tk.Label(self.content_frame, text="View Only - Pricing is managed by Admin", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
+        pricing_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
+
+        # Create and store reference to price frame
+        self.current_price_frame = tk.Frame(self.content_frame, bg='white')
+        self.current_price_frame.pack(fill=tk.BOTH, expand=True, padx=50, pady=20)
+
+        # Get fresh prices from database
+        prices = self.get_all_prices()
+
+        for pass_type, current_price in prices:
+            row = tk.Frame(self.current_price_frame, bg='white')
+            row.pack(fill=tk.X, pady=10, padx=10)
+            label = tk.Label(row, text=pass_type, font=('Arial', 12, 'bold'), bg='white', width=20, anchor='w')
+            label.pack(side=tk.LEFT, padx=(20, 10), pady=10)
+            price_frame = tk.Frame(row, bg='white')
+            price_frame.pack(side=tk.LEFT, pady=10)
+            currency_label = tk.Label(price_frame, text="₱", font=('Arial', 12, 'bold'), bg='white')
+            currency_label.pack(side=tk.LEFT, padx=(0, 5))
+            price_var = tk.StringVar(value=f"{current_price:,.2f}")
+            price_entry = tk.Entry(price_frame, textvariable=price_var, font=('Arial', 12, 'bold'), bg='white', width=10, justify='right', state='readonly', relief='flat')
+            price_entry.pack(side=tk.LEFT)
+
+    def get_all_prices(self):
+        # Get all prices from database
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT pass_type, price FROM pricing')
+        prices = cursor.fetchall()
+        conn.close()
+        return prices
+
+    def refresh_prices(self, event=None):
+        print("Price update event received")  # Debug print
+        
+        # Clear price cache to force fresh data
+        self._price_cache.clear()
+
+        # Refresh pricing display if it's currently shown
+        if hasattr(self, 'current_price_frame') and self.current_price_frame and self.current_price_frame.winfo_exists():
+            self.show_pricing()
+
+        # Update any open dialogs that show prices
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Toplevel):
+                try:
+                    self.update_dialog_prices(widget)
+                except Exception as e:
+                    print(f"Error updating dialog prices: {e}")  # Debug print
+                    continue
+
+        # Update main displays
+        self.update_displayed_prices()
+        print("Price refresh completed")  # Debug print
+
+    def update_dialog_prices(self, dialog):
+        """Update prices in an open dialog"""
+        quantity_entry = None
+        pass_type_combo = None
+        amount_var = None
+
+        # Find the relevant widgets in the dialog
+        for child in dialog.winfo_children():
+            if isinstance(child, tk.Frame):
+                for subchild in child.winfo_children():
+                    if isinstance(subchild, tk.Entry) and subchild.winfo_name() == 'quantity_entry':
+                        quantity_entry = subchild
+                    elif isinstance(subchild, ttk.Combobox) and subchild.winfo_name() == 'pass_type_combo':
+                        pass_type_combo = subchild
+                    elif isinstance(subchild, tk.Entry) and subchild.winfo_name() == 'amount_entry':
+                        amount_var = subchild.cget('textvariable')
+
+        # Update amount if we have all necessary widgets
+        if quantity_entry and pass_type_combo and amount_var:
+            try:
+                quantity = int(quantity_entry.get())
+                pass_type = pass_type_combo.get()
+                price = self.get_price_for_pass(pass_type)
+                amount = price * quantity
+                self.root.globalgetvar(amount_var).set(f"{amount:.2f}")
+                print(f"Updated price in dialog for {pass_type}: {amount:.2f}")  # Debug print
+            except (ValueError, AttributeError) as e:
+                print(f"Error updating dialog amount: {e}")  # Debug print
+                pass
+
+    def update_displayed_prices(self):
+        """Update all price displays in the interface"""
+        # Update dashboard if it exists
+        if hasattr(self, 'content_frame'):
+            self.show_dashboard()
+            print("Dashboard prices updated")  # Debug print
+
+        # Update customer view if it exists
+        if hasattr(self, 'customers_tree'):
+            self.load_customers_data()
+            print("Customer view prices updated")  # Debug print
+
+        # Update pricing view if it exists
+        if hasattr(self, 'current_price_frame') and self.current_price_frame and self.current_price_frame.winfo_exists():
+            self.show_pricing()
+            print("Pricing view updated")  # Debug print
+
+    def logout(self):
+        if messagebox.askyesno("Logout", "Are you sure you want to logout?"):
+            self.root.destroy()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    create_database()
+    EmployeeDashboard(root)
+    root.mainloop()
