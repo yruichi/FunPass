@@ -9,6 +9,7 @@ from tkcalendar import DateEntry
 import pandas as pd
 from shared import create_database, BaseWindow
 import time  # Add missing import
+import random
 
 # database setup
 def create_database():
@@ -30,7 +31,7 @@ def create_database():
     # to create employees table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS employees (
-            employee_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
@@ -54,7 +55,7 @@ def create_database():
             booked_date TEXT NOT NULL,
             purchased_date TEXT NOT NULL,
             pass_type TEXT NOT NULL,
-            employee_id INTEGER,
+            employee_id TEXT, 
             FOREIGN KEY (employee_id) REFERENCES employees (employee_id)
         )
     ''')
@@ -115,6 +116,16 @@ class AdminDashboard:
         self.content_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self.show_dashboard()
 
+    def generate_unique_employee_id(self):
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        while True:
+            new_id = f"E{random.randint(10000, 99999)}"
+            cursor.execute("SELECT 1 FROM employees WHERE employee_id = ?", (new_id,))
+            if not cursor.fetchone():
+                conn.close()
+                return new_id
+
     def create_sidebar(self):
         sidebar = tk.Frame(self.root, bg='#ECCD93', width=350)
         sidebar.grid(row=0, column=0, sticky="ns")
@@ -122,7 +133,7 @@ class AdminDashboard:
 
             # to add logo at the top of sidebar
         try:
-            logo_path = "C:/Users/MicaellaEliab/Downloads/FunPassProjectA/FunPass__1_-removebg-preview.png"
+            logo_path = "FunPass__1_-removebg-preview.png"
             logo_img = Image.open(logo_path)
             # to resize logo to fit sidebar width while maintaining aspect ratio
             logo_width = 220  
@@ -268,9 +279,9 @@ class AdminDashboard:
         try:
             current = datetime.now()
             current_time = current.strftime("%m/%d/%Y %H:%M:%S")
-            if hasattr(self, 'time_label'):
+            if hasattr(self, 'time_label') and self.time_label.winfo_exists():
                 self.time_label.config(text=current_time)
-            if hasattr(self, 'date_label'):
+            if hasattr(self, 'date_label') and self.date_label.winfo_exists():
                 self.date_label.config(text=current.strftime("%A, %B %d, %Y"))
             self.root.after(1000, self.update_time)
         except Exception as e:
@@ -653,10 +664,24 @@ class AdminDashboard:
             field_frame.pack(fill=tk.X, pady=5)
             label = tk.Label(field_frame, text=label_text, bg='white', font=('Arial', 11), width=12, anchor='e')
             label.pack(side=tk.LEFT, padx=(0, 10))
-            
-            # Create spinbox for ticket quantity
+
+            # Create spinbox for ticket quantity with default value 0 and hint behavior
             spinbox = tk.Spinbox(field_frame, from_=0, to=1000, width=10, font=('Arial', 11))
             spinbox.pack(side=tk.LEFT)
+            spinbox.delete(0, tk.END)
+            spinbox.insert(0, "0")  # Set default value and hint
+
+            def on_focus_in(event, sb=spinbox):
+                if sb.get() == "0":
+                    sb.delete(0, tk.END)
+
+            def on_focus_out(event, sb=spinbox):
+                if sb.get() == "":
+                    sb.insert(0, "0")
+
+            spinbox.bind("<FocusIn>", on_focus_in)
+            spinbox.bind("<FocusOut>", on_focus_out)
+
             alloc_entries[field_name] = spinbox
 
         # Set values if editing
@@ -709,12 +734,14 @@ class AdminDashboard:
                 cursor = conn.cursor()
                 
                 if mode == "add":
+                    employee_id = self.generate_unique_employee_id()
                     cursor.execute('''
                         INSERT INTO employees (
-                            name, username, password, express_pass, junior_pass,
+                            employee_id, name, username, password, express_pass, junior_pass,
                             regular_pass, student_pass, pwd_pass, senior_citizen_pass
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
+                        employee_id,
                         employee_data['name'], employee_data['username'],
                         employee_data['password'], employee_data['express'],
                         employee_data['junior'], employee_data['regular'],
