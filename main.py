@@ -3,12 +3,12 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import sqlite3
 from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkcalendar import DateEntry
 import pandas as pd
 from shared import create_database, BaseWindow
 import time  # Add missing import
+import random
 
 # database setup
 def create_database():
@@ -30,7 +30,7 @@ def create_database():
     # to create employees table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS employees (
-            employee_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
@@ -54,7 +54,7 @@ def create_database():
             booked_date TEXT NOT NULL,
             purchased_date TEXT NOT NULL,
             pass_type TEXT NOT NULL,
-            employee_id INTEGER,
+            employee_id TEXT, 
             FOREIGN KEY (employee_id) REFERENCES employees (employee_id)
         )
     ''')
@@ -66,6 +66,7 @@ def create_database():
             ticket_id TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
             email TEXT NOT NULL,
+            pass_type TEXT NOT NULL,
             reasons TEXT NOT NULL,
             quantity INTEGER NOT NULL,
             amount REAL NOT NULL,
@@ -115,6 +116,16 @@ class AdminDashboard:
         self.content_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self.show_dashboard()
 
+    def generate_unique_employee_id(self):
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        while True:
+            new_id = f"E{random.randint(10000, 99999)}"
+            cursor.execute("SELECT 1 FROM employees WHERE employee_id = ?", (new_id,))
+            if not cursor.fetchone():
+                conn.close()
+                return new_id
+
     def create_sidebar(self):
         sidebar = tk.Frame(self.root, bg='#ECCD93', width=350)
         sidebar.grid(row=0, column=0, sticky="ns")
@@ -122,7 +133,7 @@ class AdminDashboard:
 
             # to add logo at the top of sidebar
         try:
-            logo_path = "C:/Users/MicaellaEliab/Downloads/FunPassProjectA/FunPass__1_-removebg-preview.png"
+            logo_path = "FunPass__1_-removebg-preview.png"
             logo_img = Image.open(logo_path)
             # to resize logo to fit sidebar width while maintaining aspect ratio
             logo_width = 220  
@@ -220,7 +231,7 @@ class AdminDashboard:
         
         conn.close()
 
-            # to create statistic cards
+        # to create statistic cards
         stats_data = [
             ("Total Sales", f"₱{total_sales:,.2f}", "#2196F3"),
             ("Active Employees", str(active_employees), "#4CAF50"),
@@ -237,40 +248,159 @@ class AdminDashboard:
             tk.Label(stat_card, text=value, font=('Arial', 16, 'bold'), 
                     fg=color, bg='white').pack(pady=2)
 
-        # to create revenue section with smaller graph
-        revenue_frame = tk.LabelFrame(self.content_frame, text="Revenue Overview", 
-                                    bg='white', font=('Arial', 12, 'bold'))
-        revenue_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+  
+        top_emp_frame = tk.LabelFrame(self.content_frame, text="Top Performing Employees", 
+                                     bg='white', font=('Arial', 12, 'bold'))
+        top_emp_frame.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
 
-        # to create filter options
-        filter_frame = tk.Frame(revenue_frame, bg='white')
-        filter_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Create table frame
+        table_frame = tk.Frame(top_emp_frame)
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        tk.Label(filter_frame, text="Period:", bg='white').pack(side=tk.LEFT, padx=5)
-        period = ttk.Combobox(filter_frame, 
-                            values=["Today", "This Month", "Last 6 Months"])
-        period.pack(side=tk.LEFT, padx=5)
-        period.set("This Month")
+        # Create treeview for employees
+        columns = ('Employee Name', 'Tickets Sold', 'Total Sales')
+        emp_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=5)
 
-        # to create smaller revenue graph
-        fig, ax = plt.subplots(figsize=(2.5, 2))  
-        dates = pd.date_range(start='2024-01-01', end='2024-01-31', freq='D')
-        revenue = pd.Series(index=dates, data=range(100, 3200, 100))
-        revenue.plot(ax=ax)
-        ax.set_title('Revenue Over Time')
-        plt.tight_layout()  
+        # Configure columns
+        emp_tree.heading('Employee Name', text='Employee Name')
+        emp_tree.heading('Tickets Sold', text='Tickets Sold')
+        emp_tree.heading('Total Sales', text='Total Sales')
         
-        canvas = FigureCanvasTkAgg(fig, master=revenue_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        emp_tree.column('Employee Name', width=200)
+        emp_tree.column('Tickets Sold', width=150, anchor='center')
+        emp_tree.column('Total Sales', width=150, anchor='center')
+
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=emp_tree.yview)
+        emp_tree.configure(yscrollcommand=scrollbar.set)
+
+        # Pack components
+        emp_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Get top performing employees data
+        conn = sqlite3.connect('funpass.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT 
+                e.name,
+                SUM(c.quantity) as tickets_sold,
+                SUM(c.amount) as total_sales
+            FROM employees e
+            LEFT JOIN customers c ON e.employee_id = c.employee_id
+            GROUP BY e.employee_id, e.name
+            ORDER BY total_sales DESC
+            LIMIT 5
+        ''')
+        top_employees = cursor.fetchall()
+        conn.close()
+
+        # Insert data into table
+        for emp in top_employees:
+            name, tickets, sales = emp
+            formatted_sales = f"₱{sales:,.2f}" if sales else "₱0.00"
+            tickets = str(tickets) if tickets else "0"
+            emp_tree.insert('', tk.END, values=(name, tickets, formatted_sales))
+
+        # Create Recent Sales section with controls
+        recent_sales_frame = tk.LabelFrame(self.content_frame, text="Recent Sales", 
+                                     bg='white', font=('Arial', 12, 'bold'))
+        recent_sales_frame.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
+
+        # Add controls frame
+        controls_frame = tk.Frame(recent_sales_frame, bg='white')
+        controls_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Create table frame for recent sales
+        sales_table_frame = tk.Frame(recent_sales_frame)
+        sales_table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Create treeview for recent sales
+        sales_columns = ('Ticket ID', 'Name', 'Email', 'Pass Type', 'Quantity', 'Amount', 
+                        'Booked Date', 'Purchased Date', 'Employee')
+        sales_tree = ttk.Treeview(sales_table_frame, columns=sales_columns, show='headings', height=5)
+
+        # Configure columns
+        column_widths = {
+            'Ticket ID': 100,
+            'Name': 150,
+            'Email': 150,
+            'Pass Type': 120,
+            'Quantity': 70,
+            'Amount': 100,
+            'Booked Date': 100,
+            'Purchased Date': 100,
+            'Employee': 150
+        }
+
+        for col in sales_columns:
+            sales_tree.heading(col, text=col)
+            sales_tree.column(col, width=column_widths.get(col, 100))
+            if col in ['Quantity']:
+                sales_tree.column(col, anchor='center')
+            elif col in ['Amount']:
+                sales_tree.column(col, anchor='e')
+
+        # Add scrollbar
+        sales_scrollbar = ttk.Scrollbar(sales_table_frame, orient=tk.VERTICAL, command=sales_tree.yview)
+        sales_tree.configure(yscrollcommand=sales_scrollbar.set)
+
+        # Pack components
+        sales_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sales_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)        
+        
+        def load_recent_sales(sort_option):
+            sales_tree.delete(*sales_tree.get_children())
+            
+            sort_mapping = {
+                "Purchase Date (Latest)": "datetime(c.purchased_date) DESC",
+                "Purchase Date (Oldest)": "datetime(c.purchased_date) ASC",
+                "Amount (Highest)": "CAST(c.amount AS DECIMAL) DESC",
+                "Amount (Lowest)": "CAST(c.amount AS DECIMAL) ASC",
+                "Customer Name (A-Z)": "LOWER(c.name) ASC",
+                "Customer Name (Z-A)": "LOWER(c.name) DESC"
+            }
+            
+            sort_clause = sort_mapping.get(sort_option, "datetime(c.purchased_date) DESC")
+            
+            conn = sqlite3.connect('funpass.db')
+            cursor = conn.cursor()
+            cursor.execute(f'''
+                SELECT 
+                    c.ticket_id,
+                    c.name,
+                    c.email,
+                    c.pass_type,
+                    c.quantity,
+                    c.amount,
+                    strftime('%m/%d/%Y', c.booked_date) as booked_date,
+                    strftime('%m/%d/%Y', c.purchased_date) as purchased_date,
+                    COALESCE(e.name, 'N/A') as employee_name
+                FROM customers c
+                LEFT JOIN employees e ON c.employee_id = e.employee_id
+                ORDER BY {sort_clause}
+                LIMIT 5
+            ''')
+            recent_sales = cursor.fetchall()
+            conn.close()
+
+            for sale in recent_sales:
+                formatted_values = list(sale)
+                formatted_values[5] = f"₱{float(sale[5]):,.2f}"  # Format amount
+                sales_tree.insert('', tk.END, values=formatted_values)
+
+        # Initial load of data
+        load_recent_sales("Purchase Date (Latest)")
+
+        # Continue with the rest of the dashboard...
 
     def update_time(self):
         try:
             current = datetime.now()
             current_time = current.strftime("%m/%d/%Y %H:%M:%S")
-            if hasattr(self, 'time_label'):
+            if hasattr(self, 'time_label') and self.time_label.winfo_exists():
                 self.time_label.config(text=current_time)
-            if hasattr(self, 'date_label'):
+            if hasattr(self, 'date_label') and self.date_label.winfo_exists():
                 self.date_label.config(text=current.strftime("%A, %B %d, %Y"))
             self.root.after(1000, self.update_time)
         except Exception as e:
@@ -553,12 +683,14 @@ class AdminDashboard:
                              bg='#f44336', fg='white')
         delete_btn.pack(side=tk.LEFT, padx=5)
 
-        # Create employee table
+        tree_frame = tk.Frame(self.content_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        # Create employee table        
         columns = ('ID', 'Name', 'Username', 'Password', 
                   'Express Alloc', 'Junior Alloc', 'Regular Alloc', 
-                  'Student Alloc', 'PWD Alloc', 'Senior Alloc')
-        self.emp_tree = ttk.Treeview(self.content_frame, columns=columns, 
-                                    show='headings')
+                  'Student Alloc', 'PWD Alloc', 'Senior Alloc', 'Month Sales')
+
+        self.emp_tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
         
         # Configure columns
         self.emp_tree.heading('ID', text='ID')
@@ -568,8 +700,7 @@ class AdminDashboard:
         self.emp_tree.column('Name', width=150, anchor='w')
         
         self.emp_tree.heading('Username', text='Username')
-        self.emp_tree.column('Username', width=100, anchor='w')
-        
+        self.emp_tree.column('Username', width=100, anchor='w')        
         self.emp_tree.heading('Password', text='Password')
         self.emp_tree.column('Password', width=100, anchor='w')
         
@@ -587,10 +718,12 @@ class AdminDashboard:
         self.emp_tree.pack(fill=tk.BOTH, expand=True, pady=10)
 
         # Create scrollbar
-        scrollbar = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, 
-                                command=self.emp_tree.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.emp_tree.yview)
         self.emp_tree.configure(yscrollcommand=scrollbar.set)
+
+        # Pack Treeview and scrollbar side by side
+        self.emp_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Load employee data
         self.load_employees()
@@ -653,10 +786,24 @@ class AdminDashboard:
             field_frame.pack(fill=tk.X, pady=5)
             label = tk.Label(field_frame, text=label_text, bg='white', font=('Arial', 11), width=12, anchor='e')
             label.pack(side=tk.LEFT, padx=(0, 10))
-            
-            # Create spinbox for ticket quantity
+
+            # Create spinbox for ticket quantity with default value 0 and hint behavior
             spinbox = tk.Spinbox(field_frame, from_=0, to=1000, width=10, font=('Arial', 11))
             spinbox.pack(side=tk.LEFT)
+            spinbox.delete(0, tk.END)
+            spinbox.insert(0, "0")  # Set default value and hint
+
+            def on_focus_in(event, sb=spinbox):
+                if sb.get() == "0":
+                    sb.delete(0, tk.END)
+
+            def on_focus_out(event, sb=spinbox):
+                if sb.get() == "":
+                    sb.insert(0, "0")
+
+            spinbox.bind("<FocusIn>", on_focus_in)
+            spinbox.bind("<FocusOut>", on_focus_out)
+
             alloc_entries[field_name] = spinbox
 
         # Set values if editing
@@ -709,12 +856,14 @@ class AdminDashboard:
                 cursor = conn.cursor()
                 
                 if mode == "add":
+                    employee_id = self.generate_unique_employee_id()
                     cursor.execute('''
                         INSERT INTO employees (
-                            name, username, password, express_pass, junior_pass,
+                            employee_id, name, username, password, express_pass, junior_pass,
                             regular_pass, student_pass, pwd_pass, senior_citizen_pass
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
+                        employee_id,
                         employee_data['name'], employee_data['username'],
                         employee_data['password'], employee_data['express'],
                         employee_data['junior'], employee_data['regular'],
@@ -778,8 +927,8 @@ class AdminDashboard:
             except sqlite3.Error as e:
                 messagebox.showerror("Error", f"Database error: {str(e)}")
             finally:
-                conn.close()
-
+                conn.close()    
+    
     def load_employees(self):
         # to clear existing items
         for item in self.emp_tree.get_children():
@@ -787,14 +936,46 @@ class AdminDashboard:
             
         # to load from database
         conn = sqlite3.connect('funpass.db')
-        cursor = conn.cursor()
+        cursor = conn.cursor()        # First get all employees and their basic info
         cursor.execute('SELECT * FROM employees')
         employees = cursor.fetchall()
-        conn.close()
         
-            # to insert into treeview
+        # Then get the monthly sales for each employee
         for emp in employees:
-            self.emp_tree.insert('', tk.END, values=emp)
+            employee_id = emp[0]
+            # Get monthly sales
+            cursor.execute('''
+                SELECT COALESCE(SUM(amount), 0) 
+                FROM customers 
+                WHERE employee_id = ? 
+                AND strftime('%Y-%m', purchased_date) = strftime('%Y-%m', 'now')
+            ''', (employee_id,))
+            monthly_sales = cursor.fetchone()[0] or 0
+            
+            # Get approved refunds for this month
+            cursor.execute('''
+                SELECT COALESCE(SUM(amount), 0)
+                FROM cancellations
+                WHERE ticket_id IN (
+                    SELECT ticket_id 
+                    FROM customers 
+                    WHERE employee_id = ?
+                )
+                AND status = 'Approved'
+                AND strftime('%Y-%m', purchased_date) = strftime('%Y-%m', 'now')
+            ''', (employee_id,))
+            refunds = cursor.fetchone()[0] or 0
+            
+            # Calculate net monthly sales
+            net_monthly_sales = monthly_sales - refunds
+              # Create list of values for treeview
+            emp_list = list(emp)
+            emp_list.append(f"₱{net_monthly_sales:,.2f}")  # Add monthly sales at the end
+            
+            # Insert into treeview
+            self.emp_tree.insert('', tk.END, values=emp_list)
+            
+        conn.close()
 
     def show_customers(self):
         self.clear_content()
@@ -830,15 +1011,22 @@ class AdminDashboard:
                              bg='#f44336', fg='white')
         delete_btn.pack(side=tk.LEFT, padx=5)
 
-        columns = ('Ticket ID', 'Name', 'Email', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Employee')
-        self.customers_tree = ttk.Treeview(self.content_frame, columns=columns, show='headings')
+        tree_frame = tk.Frame(self.content_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        columns = ('Ticket ID', 'Name', 'Email', 'Pass Type', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Employee')
+        self.customers_tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
+
         for col in columns:
             self.customers_tree.heading(col, text=col)
             self.customers_tree.column(col, width=120)
-        self.customers_tree.pack(fill=tk.BOTH, expand=True, pady=10)
-        scrollbar = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, command=self.customers_tree.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.customers_tree.yview)
         self.customers_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.customers_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
         self.load_customers_data()
 
     def search_customers(self, *args):
@@ -847,11 +1035,11 @@ class AdminDashboard:
             self.customers_tree.delete(item)
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.quantity, c.amount, 
-                    strftime('%m/%d/%Y', c.booked_date) as booked_date, 
-                    strftime('%m/%d/%Y', c.purchased_date) as purchased_date, 
-                    IFNULL(e.name, '') as employee_name 
-                    FROM customers c 
+        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.pass_type, c.quantity, c.amount, \
+                    strftime('%m/%d/%Y', c.booked_date) as booked_date, \
+                    strftime('%m/%d/%Y', c.purchased_date) as purchased_date, \
+                    IFNULL(e.name, '') as employee_name \
+                    FROM customers c \
                     LEFT JOIN employees e ON c.employee_id = e.employee_id''')
         customers = cursor.fetchall()
         conn.close()
@@ -869,9 +1057,9 @@ class AdminDashboard:
         elif sort_option == "Name (Z-A)":
             items.sort(key=lambda x: x[1], reverse=True)
         elif sort_option == "Date (Newest)":
-            items.sort(key=lambda x: x[6], reverse=True)
+            items.sort(key=lambda x: x[7], reverse=True)
         elif sort_option == "Date (Oldest)":
-            items.sort(key=lambda x: x[6])
+            items.sort(key=lambda x: x[7])
         for item in self.customers_tree.get_children():
             self.customers_tree.delete(item)
         for item in items:
@@ -882,11 +1070,11 @@ class AdminDashboard:
             self.customers_tree.delete(item)
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.quantity, c.amount, 
-                    strftime('%m/%d/%Y', c.booked_date) as booked_date, 
-                    strftime('%m/%d/%Y', c.purchased_date) as purchased_date, 
-                    IFNULL(e.name, '') as employee_name 
-                    FROM customers c 
+        cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.pass_type, c.quantity, c.amount, \
+                    strftime('%m/%d/%Y', c.booked_date) as booked_date, \
+                    strftime('%m/%d/%Y', c.purchased_date) as purchased_date, \
+                    IFNULL(e.name, '') as employee_name \
+                    FROM customers c \
                     LEFT JOIN employees e ON c.employee_id = e.employee_id''')
         customers = cursor.fetchall()
         conn.close()
@@ -938,17 +1126,20 @@ class AdminDashboard:
                              bg='#f44336', fg='white')
         delete_btn.pack(side=tk.LEFT, padx=5)
 
-        # to create cancellations table
-        columns = ('Ticket ID', 'Name', 'Email', 'Reason', 'Quantity', 'Amount', 
-                  'Booked Date', 'Purchased Date', 'Status')
-        self.cancellations_tree = ttk.Treeview(self.content_frame, columns=columns, 
-                                              show='headings')
-        
+        tree_frame = tk.Frame(self.content_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        # Define columns
+        columns = ('Ticket ID', 'Name', 'Email', 'Pass Type', 'Reason', 'Quantity', 'Amount', 
+           'Booked Date', 'Purchased Date', 'Status')
+        self.cancellations_tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
+
         # Configure columns with custom widths and left alignment
         column_widths = {
             'Ticket ID': 100,
             'Name': 150,
             'Email': 200,
+            'Pass Type': 120,
             'Reason': 200,
             'Quantity': 80,
             'Amount': 100,
@@ -959,16 +1150,15 @@ class AdminDashboard:
         
         for col in columns:
             self.cancellations_tree.heading(col, text=col)
-            width = column_widths.get(col, 120)  # default to 120 if not specified
+            width = column_widths.get(col, 120)
             self.cancellations_tree.column(col, width=width, anchor='w')
 
-        self.cancellations_tree.pack(fill=tk.BOTH, expand=True, pady=10)
 
-        # to add scrollbar
-        scrollbar = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, 
-                                command=self.cancellations_tree.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.cancellations_tree.yview)
         self.cancellations_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.cancellations_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # to load initial data
         self.load_cancellations_data()
@@ -1058,34 +1248,24 @@ class AdminDashboard:
 
     def search_cancellations(self, *args):
         search_text = self.cancel_search_var.get().lower()
-
-        # Clear current display
         for item in self.cancellations_tree.get_children():
             self.cancellations_tree.delete(item)
-
-        # Get all cancellations from database
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('''
-
-        SELECT 
-            ticket_id, name, email, reasons, quantity, amount,
+        cursor.execute('''        SELECT ticket_id, name, email, pass_type, reasons, quantity, amount,
             strftime('%m/%d/%Y', booked_date) as booked_date, 
             strftime('%m/%d/%Y', purchased_date) as purchased_date,
             status
         FROM cancellations
-    ''')
+        ''')
         cancellations = cursor.fetchall()
         conn.close()
-
-        # Filter and display matching cancellations
         for cancellation in cancellations:
-            # Search in all relevant fields (ticket_id, name, email, status)
             searchable_fields = [
                 str(cancellation[0]),  # ticket_id
                 str(cancellation[1]),  # name
                 str(cancellation[2]),  # email
-                str(cancellation[8])   # status
+                str(cancellation[9])   # status
             ]
             if any(search_text in field.lower() for field in searchable_fields):
                 self.cancellations_tree.insert('', tk.END, values=cancellation)
@@ -1100,29 +1280,24 @@ class AdminDashboard:
         elif sort_option == "Name (Z-A)":
             items.sort(key=lambda x: x[1], reverse=True)
         elif sort_option == "Date (Newest)":
-            items.sort(key=lambda x: x[7], reverse=True)
-        elif sort_option == "Date (Oldest)":
-            items.sort(key=lambda x: x[7])
-        elif sort_option == "Status (A-Z)":
-            items.sort(key=lambda x: x[8])
-        elif sort_option == "Status (Z-A)":
             items.sort(key=lambda x: x[8], reverse=True)
+        elif sort_option == "Date (Oldest)":
+            items.sort(key=lambda x: x[8])
+        elif sort_option == "Status (A-Z)":
+            items.sort(key=lambda x: x[9])
+        elif sort_option == "Status (Z-A)":
+            items.sort(key=lambda x: x[9], reverse=True)
         for item in self.cancellations_tree.get_children():
             self.cancellations_tree.delete(item)
         for item in items:
             self.cancellations_tree.insert('', tk.END, values=item)
 
     def load_cancellations_data(self):
-        # to clear existing items
         for item in self.cancellations_tree.get_children():
             self.cancellations_tree.delete(item)
-            
-        # to load from database
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT 
-                ticket_id, name, email, reasons, quantity, amount,
+        cursor.execute('''            SELECT ticket_id, name, email, pass_type, reasons, quantity, amount,
                 strftime('%m/%d/%Y', booked_date) as booked_date, 
                 strftime('%m/%d/%Y', purchased_date) as purchased_date,
                 status
@@ -1131,8 +1306,6 @@ class AdminDashboard:
         ''')
         cancellations = cursor.fetchall()
         conn.close()
-        
-        # to insert into treeview
         for cancellation in cancellations:
             self.cancellations_tree.insert('', tk.END, values=cancellation)
 
