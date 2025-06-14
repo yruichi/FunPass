@@ -23,7 +23,7 @@ def show_login():
 
     # Load and display logo
     try:
-        logo_path = "C:/Users/MicaellaEliab/Downloads/FunPassProjectA/FunPass__1_-removebg-preview.png"
+        logo_path = "FunPass__1_-removebg-preview.png"
         logo_img = Image.open(logo_path)
         logo_width = 300
         aspect_ratio = logo_img.height / logo_img.width
@@ -87,6 +87,7 @@ def show_login():
         conn.close()
 
     tk.Button(form_frame, text="Login", font=('Arial', 12, 'bold'), bg='#4CAF50', fg='white', width=20, command=login).pack(pady=20)
+    root.bind('<Return>', lambda event: login())
     root.mainloop()
 
 if __name__ == "__main__":
