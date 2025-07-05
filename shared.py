@@ -1,13 +1,15 @@
 """
 This module contains utilities and UI elements shared between modules.
-"""
+""" # Multi-line string for module docstring
+
+# shared.py is a helper module that prepares your database and provides reusable UI utilities for your FunPass application. It is meant to be imported and used by your main application files.
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 from tkcalendar import DateEntry
 from datetime import datetime
 import sqlite3
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # no need since theres no graph
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pandas as pd
 import random
@@ -108,7 +110,6 @@ def create_database():
     conn.commit()
     conn.close()
 
-# Common UI utilities
 class BaseWindow:
     def center_window(self):
         screen_width = self.root.winfo_screenwidth()

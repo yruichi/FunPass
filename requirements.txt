@@ -1,4 +1,4 @@
-# No external dependencies required - using standard Tkinter 
+# Requirements for FunPass application
 tkinter
 tkcalendar
 pillow
