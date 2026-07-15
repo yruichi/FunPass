@@ -14,9 +14,10 @@ The project was created to replace manual ticketing with a faster and more organ
 
 ## 👩‍💻 Author
 
-**Micaella G. Eliab**  
-**BSIT 1-1**  
-**2023**
+- **Micaella G. Eliab** — Project Lead, System Design, Development, and Documentation
+- **Corish Anne V. Arce** (@corishannevarce) — Collaborator
+- **Derrick Emmanuel Pamintuan** (@Dorkum) — Collaborator
+- **Mary Anne Purawan** (@marebisco) — Collaborator
 
 ---
 
